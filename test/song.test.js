@@ -31,7 +31,7 @@ test("the plan cues each grid at the start of every section", () => {
   assert.deepEqual(plan.parts["Protein Grid"], [{ bar: 0, pattern: null }, { bar: 4, pattern: 2 }, { bar: 12, pattern: null }]);
   assert.deepEqual(plan.parts["Bass Station Grid"].map((cue) => cue.pattern), [null, 0, 15]);
   // It reads back through sync.js the way each grid gets it.
-  assert.deepEqual(Sync.songPart(plan, "S-1 Grid"), { bars: 14, loop: true, cues: [{ bar: 0, pattern: 0 }, { bar: 4, pattern: 1 }, { bar: 12, pattern: 0 }] });
+  assert.deepEqual(Sync.songPart(plan, "S-1 Grid"), { bars: 14, loop: true, cues: [{ bar: 0, pattern: 0 }, { bar: 4, pattern: 1 }, { bar: 12, pattern: 0 }], loops: [] });
 });
 
 test("the section and bar playing at any point", () => {
@@ -76,4 +76,16 @@ test("TD-3 Grid plays its grid, a library pattern by id, or nothing", () => {
   const plan = Song.plan(song);
   assert.deepEqual(Sync.songPart(plan, "TD-3 Grid").cues, [{ bar: 0, pattern: "grid" }, { bar: 2, pattern: "p1a2b3" }, { bar: 4, pattern: null }]);
   assert.deepEqual(Sync.songPart(plan, "MPC Grid").cues.map((cue) => cue.pattern), [3, 15, null]);
+});
+
+test("sections with Loop on repeat, as the plan tells every grid", () => {
+  const song = Song.cleanSong({ sections: [{ name: "A", bars: 2 }, { name: "B", bars: 4, loop: true }, { name: "C", bars: 2 }] });
+  assert.deepEqual(Song.bounds(song), [{ start: 0, end: 2 }, { start: 2, end: 6 }, { start: 6, end: 8 }]);
+  const plan = Song.plan(song);
+  assert.deepEqual(plan.loops, [{ start: 2, end: 6 }]);
+  // A grid plays A, then B again and again.
+  const part = Sync.songStart(Sync.songPart(plan, "S-1 Grid"));
+  const heard = [part.bar];
+  for (let i = 0; i < 11; i += 1) { Sync.songNextBar(part); heard.push(part.bar); }
+  assert.deepEqual(heard, [0, 1, 2, 3, 4, 5, 2, 3, 4, 5, 2, 3]);
 });

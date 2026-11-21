@@ -162,3 +162,11 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .divider { width: 1px; height: 22px; background: var(--line); }
 .toggle[aria-pressed="true"], .next-button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 700; }
 header.bar { gap: 6px 10px; }
+/* Loop, Up next and progress for each section. */
+.play-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.icon-button { display: inline-grid; place-items: center; width: 30px; height: 26px; padding: 0; color: var(--muted); }
+.icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.icon-button[aria-pressed="true"] { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
+.progress { flex: 0 0 100%; height: 6px; overflow: hidden; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; }
+.progress .fill { width: 0; height: 100%; background: var(--accent); }
+.progress-label { margin-left: auto; min-width: 26px; color: var(--accent); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }

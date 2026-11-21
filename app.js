@@ -105,6 +105,24 @@ function patternSelect(item, instrument) {
   return select;
 }
 
+// An infinity sign with an arrow, for Loop, and two chevrons, for Up next.
+const ICONS = {
+  loop: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12c-1.8-2.4-3.3-4-5.5-4a4 4 0 0 0 0 8c2.2 0 3.7-1.6 5.5-4s3.3-4 5.5-4a4 4 0 0 1 0 8c-2.2 0-3.7-1.6-5.5-4z"/><path d="M15 6.2l2.7 1.7-1.5 2.8"/></svg>',
+  next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6l6 6-6 6M12 6l6 6-6 6"/></svg>',
+};
+
+function iconButton(icon, label, title, pressed, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "icon-button";
+  button.innerHTML = ICONS[icon];
+  button.setAttribute("aria-label", label);
+  button.setAttribute("aria-pressed", String(pressed));
+  button.title = title;
+  button.onclick = onClick;
+  return button;
+}
+
 function toolButton(text, title, onClick, disabled = false) {
   const button = document.createElement("button");
   button.type = "button";
@@ -169,13 +187,7 @@ function render() {
       toolButton("Copy", "Add a copy of this section after it", () => copySection(index)),
       toolButton("Del", "Delete this section", () => deleteSection(index)),
     );
-    // While playing, a section can be queued to play when the current one finishes.
-    const queued = playback.queued?.index === index;
-    const next = toolButton(queued ? "Queued" : "Next", queued ? "Plays when the current section finishes. Click to cancel." : "Play this section when the current one finishes",
-      () => queueSection(index), !playback.on);
-    next.className = "next-button";
-    next.setAttribute("aria-pressed", String(queued));
-    cell.append(next);
+
     tools.append(cell);
 
     const nameCell = document.createElement("td");
@@ -200,7 +212,33 @@ function render() {
     barsCell.append(select);
     bars.append(barsCell);
   });
-  rows.push(tools, names, bars);
+  // Loop and Up next for each section, and how far through it the song is.
+  const play = document.createElement("tr");
+  play.append(Object.assign(document.createElement("th"), { textContent: "Play" }));
+  song.sections.forEach((item, index) => {
+    const cell = document.createElement("td");
+    cell.className = "section-play";
+    cell.dataset.section = String(index);
+    const queued = playback.queued?.index === index;
+    const loop = iconButton("loop", `Loop ${item.name}`,
+      item.loop ? "Looping: this section repeats each time it's reached. Click to stop it looping." : "Loop: repeat this section each time it's reached, until you click again",
+      item.loop, () => toggleLoop(index));
+    const next = iconButton("next", `Play ${item.name} next`,
+      queued ? "Up next: plays when the section playing finishes. Click to cancel." : "Up next: play this section when the one playing finishes",
+      queued, () => queueSection(index));
+    next.disabled = !playback.on;
+    const progress = document.createElement("div");
+    progress.className = "progress";
+    progress.setAttribute("role", "progressbar");
+    progress.setAttribute("aria-label", `${item.name} progress`);
+    progress.append(Object.assign(document.createElement("div"), { className: "fill" }));
+    const label = Object.assign(document.createElement("span"), { className: "progress-label" });
+    const inner = Object.assign(document.createElement("div"), { className: "play-cell" });
+    inner.append(loop, next, label, progress);
+    cell.append(inner);
+    play.append(cell);
+  });
+  rows.push(tools, names, bars, play);
 
   for (const instrument of Song.INSTRUMENTS) {
     const row = document.createElement("tr");
@@ -251,11 +289,9 @@ function sectionBounds(target, index) {
 function renderPlaying() {
   $("play").textContent = playback.on ? "Stop" : "Play";
   $("play").setAttribute("aria-pressed", String(playback.on));
-  for (const id of ["section-back", "section-loop", "section-next"]) $(id).disabled = !playback.on;
+  for (const id of ["section-back", "section-next"]) $(id).disabled = !playback.on;
   let current = null;
   let text = "";
-  const holding = Boolean(playback.on && (playback.sim.hold || pendingHold()));
-  $("section-loop").setAttribute("aria-pressed", String(holding));
   if (playback.on) {
     const target = playback.played;
     const total = Song.totalBars(target);
@@ -263,7 +299,7 @@ function renderPlaying() {
     current = at ? at.index : null;
     if (at) {
       text = `Bar ${playback.sim.bar + 1} of ${total}: ${target.sections[at.index].name}, bar ${at.bar + 1}`;
-      if (playback.sim.hold) text += ", looping";
+      if (target.sections[at.index].loop) text += ", looping";
       if (playback.queued) text += `. Next: ${target.sections[playback.queued.index].name}`;
     }
   }
@@ -271,14 +307,37 @@ function renderPlaying() {
   document.querySelectorAll("#table td").forEach((cell) => {
     cell.classList.toggle("playing", current !== null && Number(cell.dataset.section) === current);
   });
-  document.querySelectorAll(".next-button").forEach((button) => { button.disabled = !playback.on; });
+  renderProgress();
 }
 
-// Whether a hold is on its way, so the Loop section button shows it at once.
-const pendingHold = () => {
-  const last = [...playback.sim.moves].reverse().find((move) => "hold" in move);
-  return last ? Boolean(last.hold) : false;
-};
+// Fills the bar under the section playing, as far through it as the song is.
+function renderProgress() {
+  let index = null;
+  let done = 0;
+  let text = "";
+  if (playback.on) {
+    const at = Song.sectionAt(playback.played, playback.sim.bar);
+    if (at) {
+      index = at.index;
+      const bars = playback.played.sections[at.index].bars;
+      const inBar = (pulseAt(performance.now()) % BAR_PULSES) / BAR_PULSES;
+      done = Math.min(1, (at.bar + Math.max(0, inBar)) / bars);
+      text = `${at.bar + 1}/${bars}`;
+    }
+  }
+  document.querySelectorAll(".section-play").forEach((cell) => {
+    const here = index !== null && Number(cell.dataset.section) === index;
+    cell.querySelector(".fill").style.width = `${here ? done * 100 : 0}%`;
+    cell.querySelector(".progress").setAttribute("aria-valuenow", String(here ? Math.round(done * 100) : 0));
+    cell.querySelector(".progress-label").textContent = here ? text : "";
+  });
+}
+
+function animate() {
+  if (!playback.on) return;
+  renderProgress();
+  requestAnimationFrame(animate);
+}
 
 function tick() {
   if (!playback.on) return;
@@ -339,61 +398,61 @@ function skipSection(by) {
     to = 0;
   }
   to = Math.max(0, to);
-  sendMove({ atBar, toBar: sectionBounds(target, to).start, hold: null });
+  sendMove({ atBar, toBar: sectionBounds(target, to).start });
   playback.queued = null;
   render();
   setStatus(`Jumping to "${target.sections[to].name}" on the next bar.`);
 }
 
-// Holds the section playing, so it repeats until Loop section is pressed again.
-function toggleSectionLoop() {
+// Turns a section's Loop on or off. While the song plays, every grid changes on the next bar.
+function toggleLoop(index) {
+  const item = song.sections[index];
+  change(() => { item.loop = !item.loop; });
   if (!playback.on) return;
-  const atBar = nextSafeBar();
-  if (playback.sim.hold || pendingHold()) {
-    sendMove({ atBar, hold: null });
-    setStatus("The section stops looping, and the song carries on after it.");
-  } else {
-    const target = playback.played;
-    const bar = barAt(atBar);
-    if (bar === null) return;
-    // The section the song is in on the bar the hold starts. On its first bar, that's the
-    // one just finishing, which is the one you hear.
-    const index = Song.sectionAt(target, bar).index;
-    const playingIndex = Song.sectionAt(target, playback.sim.bar).index;
-    const held = sectionBounds(target, bar === sectionBounds(target, index).start ? playingIndex : index);
-    sendMove({ atBar, hold: { start: held.start, end: held.end } });
-    setStatus(`Looping "${target.sections[Song.sectionAt(target, held.start).index].name}" until you press Loop section again.`);
-  }
+  const played = playback.played.sections.find((section) => section.id === item.id);
+  if (!played) return;
+  played.loop = item.loop;
+  sendMove({ atBar: nextSafeBar(), loops: Song.loops(playback.played) });
+  setStatus(item.loop ? `"${item.name}" loops until you click its loop button again.` : `"${item.name}" stops looping, and the song carries on after it.`);
   renderPlaying();
 }
 
-// Queues a section to play when the current one has played through, or cancels it.
+
+// The section playing, and the bar of playback its run through ends on: where a looped
+// section goes round again, or the song moves on.
+function runEnd() {
+  const target = playback.played;
+  const playing = Song.sectionAt(target, playback.sim.bar);
+  const { end } = sectionBounds(target, playing.index);
+  return { playing, atBar: Math.max(nextSafeBar(), playback.sim.played + (end - playback.sim.bar)) };
+}
+
+// Queues a section to play when the one playing has run through, or cancels it.
 function queueSection(index) {
   if (!playback.on) return;
   const target = playback.played;
   if (playback.queued?.index === index) {
-    // Back to what would have happened: the held section again, or the next one.
-    const { atBar, end, hold } = playback.queued;
-    const natural = hold ? hold.start : end;
-    if (natural >= target.sections.reduce((sum, item) => sum + item.bars, 0) && !target.loop) {
+    // What would have happened without it: the looped section again, or the next one.
+    const { atBar, move } = playback.queued;
+    playback.sim.moves = playback.sim.moves.filter((item) => item !== move);
+    const natural = barAt(atBar);
+    if (natural === null) {
+      playback.sim.moves.push(move);
       setStatus("It's too late to cancel, as the song ends there.", true);
       return;
     }
-    sendMove({ atBar, toBar: natural >= Song.totalBars(target) ? 0 : natural, hold });
+    sendMove({ atBar, toBar: natural });
     playback.queued = null;
     render();
     setStatus("Cancelled.");
     return;
   }
-  const playing = Song.sectionAt(target, playback.sim.bar);
-  const bounds = sectionBounds(target, playing.index);
-  const hold = playback.sim.hold;
-  const end = hold ? hold.end : bounds.end;
-  const atBar = Math.max(nextSafeBar(), playback.sim.played + (end - playback.sim.bar));
-  sendMove({ atBar, toBar: sectionBounds(target, index).start, hold: null });
-  playback.queued = { index, atBar, end, hold };
+  if (playback.queued) queueSection(playback.queued.index);
+  const { playing, atBar } = runEnd();
+  sendMove({ atBar, toBar: sectionBounds(target, index).start });
+  playback.queued = { index, atBar, move: playback.sim.moves[playback.sim.moves.length - 1] };
   render();
-  setStatus(`"${target.sections[index].name}" plays when "${target.sections[playing.index].name}" finishes.`);
+  setStatus(`Up next: "${target.sections[index].name}", when "${target.sections[playing.index].name}" finishes.`);
 }
 
 function startPlaying() {
@@ -410,11 +469,12 @@ function startPlaying() {
   }
   Object.assign(playback, {
     on: true, anchorTime: at, anchorPulse: 0, bpm: song.bpm, queued: null,
-    played: JSON.parse(JSON.stringify(song)), sim: Sync.songStart({ bars: plan.bars, loop: plan.loop }),
+    played: JSON.parse(JSON.stringify(song)), sim: Sync.songStart({ bars: plan.bars, loop: plan.loop, loops: plan.loops }),
   });
   clearInterval(playback.timer);
   playback.timer = setInterval(tick, 100);
   render();
+  requestAnimationFrame(animate);
   const playing = Song.INSTRUMENTS.filter((item) => peers.includes(item.name)).map((item) => item.label);
   setStatus(`Playing "${song.name || "Untitled"}" on ${playing.join(", ")}.`);
 }
@@ -597,7 +657,6 @@ function bind() {
   $("loop").onchange = () => change(() => { song.loop = $("loop").checked; });
   $("section-back").onclick = () => skipSection(-1);
   $("section-next").onclick = () => skipSection(1);
-  $("section-loop").onclick = toggleSectionLoop;
   $("add-section").onclick = () => copySection(song.sections.length - 1);
   $("save").onclick = () => saveSong(false);
   $("save-new").onclick = () => saveSong(true);

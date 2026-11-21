@@ -43,6 +43,7 @@ const Song = (() => {
       name: typeof fields.name === "string" ? fields.name.slice(0, 30) : "Section",
       bars: Number.isInteger(fields.bars) && fields.bars >= 1 && fields.bars <= 64 ? fields.bars : 4,
       patterns,
+      loop: Boolean(fields.loop), // Repeats each time it's reached, until it's turned off.
     };
   }
 
@@ -86,8 +87,21 @@ const Song = (() => {
       for (const { name } of INSTRUMENTS) parts[name].push({ bar, pattern: item.patterns[name] });
       bar += item.bars;
     }
-    return { bars: bar, loop: song.loop, parts };
+    return { bars: bar, loop: song.loop, parts, loops: loops(song) };
   }
+
+  // Where each section starts and ends, in bars.
+  function bounds(song) {
+    let start = 0;
+    return song.sections.map((item) => {
+      const range = { start, end: start + item.bars };
+      start = range.end;
+      return range;
+    });
+  }
+
+  // The stretches of bars that repeat: the sections with Loop on.
+  const loops = (song) => bounds(song).filter((range, index) => song.sections[index].loop);
 
   // The section playing at a bar counted from 0, and the bar within it.
   function sectionAt(song, bar) {
@@ -99,7 +113,7 @@ const Song = (() => {
     return null;
   }
 
-  return { BAR_CHOICES, GRID, INSTRUMENTS, MAX_SECTIONS, PATTERNS, cleanSong, newSong, plan, section, sectionAt, totalBars };
+  return { BAR_CHOICES, GRID, INSTRUMENTS, MAX_SECTIONS, PATTERNS, bounds, cleanSong, loops, newSong, plan, section, sectionAt, totalBars };
 })();
 
 if (typeof module !== "undefined") module.exports = Song;
