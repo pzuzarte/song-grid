@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Song Grid</title>
+<link rel="stylesheet" href="style.css">
+<script>
+  // Set before the page draws, so it doesn't flash the other theme.
+  try { if (localStorage.getItem("song-grid-theme") === "light") document.documentElement.dataset.theme = "light"; } catch {}
+</script>
+<!-- Counts visits anonymously. A fixed version with a checksum, and the tool works if it's blocked. -->
+<script data-goatcounter="https://pzuzarte.goatcounter.com/count"
+        async src="https://gc.zgo.at/count.v5.js"
+        crossorigin="anonymous"
+        integrity="sha384-atnOLvQb9t+jTSipvd75X2yginT4PjVbqDdlJAmxMm+wYElFmeR6EmLP5bYeoRVQ"></script>
+</head>
+<body>
+<header class="bar">
+  <h1>Song Grid</h1>
+  <label>Song
+    <input id="song-name" type="text" maxlength="40" placeholder="Untitled" spellcheck="false">
+  </label>
+  <button id="play" class="primary" type="button" title="Starts the open grids playing the song (Space)">Play</button>
+  <label>BPM
+    <input id="bpm" type="number" min="20" max="300" step="0.1" value="120">
+  </label>
+  <label class="check" title="Starts the song again after its last section">
+    <input id="loop" type="checkbox"> Loop
+  </label>
+  <span id="position" class="position" aria-live="off"></span>
+  <div class="spacer"></div>
+  <span id="peers" class="pill" role="status">Not linked</span>
+  <button id="theme-toggle" type="button" title="Switch between dark and light mode">Light mode</button>
+  <button id="help-open" type="button" title="Help (press ?)">Help</button>
+</header>
+
+<main class="main">
+  <section class="card arrangement" aria-labelledby="arrangement-title">
+    <div class="card-head">
+      <h2 id="arrangement-title">Arrangement</h2>
+      <span id="total" class="muted"></span>
+      <div class="spacer"></div>
+      <button id="add-section" type="button" title="Adds a section at the end, a copy of the last one">Add section</button>
+    </div>
+    <div class="table-wrap">
+      <table id="table" class="song-table"></table>
+    </div>
+    <p class="muted hint">Each column is a section, played left to right. Choose its length in bars, and the pattern each grid plays in it, or Off. Every grid starts its pattern from the first step at the start of each section.</p>
+  </section>
+
+  <section class="card songs" aria-labelledby="songs-title">
+    <div class="card-head">
+      <h2 id="songs-title">Saved songs</h2>
+      <div class="spacer"></div>
+      <button id="save" type="button" title="Saves this song in this browser under its name">Save</button>
+      <button id="save-new" type="button" title="Saves it as a new song, keeping the one it was loaded from">Save as new</button>
+      <button id="new-song" type="button" title="Starts a new song. Unsaved changes are lost.">New</button>
+    </div>
+    <ul id="song-list" class="song-list"></ul>
+    <p id="songs-empty" class="muted">No saved songs yet.</p>
+    <div class="row">
+      <button id="export" type="button" title="Downloads every saved song as a file">Back up</button>
+      <button id="import" type="button" title="Adds songs from a backup file">Restore</button>
+      <input id="import-file" type="file" accept=".json,application/json" hidden>
+    </div>
+  </section>
+</main>
+
+<footer class="bar foot">
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+</footer>
+
+<dialog id="help" class="help" aria-labelledby="help-title">
+  <div class="help-head">
+    <h2 id="help-title">Song Grid help</h2>
+    <button id="help-close" type="button">Close</button>
+  </div>
+  <div class="help-body" tabindex="0">
+    <p>Arranges the patterns you've made in the grid editors into a song, and plays them together on your instruments. Song Grid makes no sound itself: it tells each open grid which pattern to play, and when. It needs a current Chrome or Edge. Your songs stay in your browser.</p>
+    <p>Visits to this page are counted anonymously with <a href="https://www.goatcounter.com/" target="_blank" rel="noopener">GoatCounter</a>, which uses no cookies.</p>
+
+    <h3>Set up</h3>
+    <ol>
+      <li>Open the grids you want in the same browser, in other tabs: <a href="https://pzuzarte.github.io/s1-grid/" target="_blank" rel="noopener">S-1 Grid</a>, <a href="https://pzuzarte.github.io/protein-grid/" target="_blank" rel="noopener">Protein Grid</a> and <a href="https://pzuzarte.github.io/bass-station-grid/" target="_blank" rel="noopener">Bass Station Grid</a>.</li>
+      <li>In each, connect its instrument, and tick <b>Sync</b>. The badge at the top of this page shows which grids are linked. Rows for grids that aren't open are greyed.</li>
+    </ol>
+
+    <h3>Arranging</h3>
+    <ul>
+      <li>Each column is a section, such as Intro, Verse or Chorus, played left to right. Click its name to change it.</li>
+      <li><b>Bars</b> sets how long the section lasts.</li>
+      <li>Each row is a grid. Choose the pattern it plays in that section, 1 to 16, or <b>Off</b> for silence. A pattern shorter than its section repeats, and a longer one is cut at the section's end.</li>
+      <li>Every grid starts its pattern from the first step at the start of each section, so they stay together even when their patterns are different lengths.</li>
+      <li>The buttons above each section move it left or right, copy it, or delete it. <b>Add section</b> adds a copy of the last one at the end.</li>
+    </ul>
+
+    <h3>Playing</h3>
+    <ul>
+      <li><b>Play</b> starts every linked grid at the song's <b>BPM</b>, and <b>Stop</b> stops them. Space does both. Stop on a grid stops them all too.</li>
+      <li>The section playing is highlighted, with the bar above. At the end the grids stop, unless <b>Loop</b> is on.</li>
+      <li>Changing the BPM while it plays changes it on every grid.</li>
+      <li>While a song plays, the grids switch patterns themselves. Pressing Play on a grid plays it on its own as usual, without the song.</li>
+    </ul>
+
+    <h3>Saving</h3>
+    <ul>
+      <li><b>Save</b> keeps the song in this browser under its name, and <b>Save as new</b> keeps a copy. Click a saved song to open it.</li>
+      <li>Songs point to pattern numbers in each grid, so changing a grid's pattern changes the song too.</li>
+      <li><b>Back up</b> downloads every saved song as a file, and <b>Restore</b> adds songs from one.</li>
+    </ul>
+  </div>
+</dialog>
+
+<script src="sync.js"></script>
+<script src="song.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

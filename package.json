@@ -1,0 +1,8 @@
+{
+  "name": "song-grid",
+  "private": true,
+  "description": "Arranges patterns from the grid editors into a song, and plays them together.",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  }
+}
