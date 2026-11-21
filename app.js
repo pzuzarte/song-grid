@@ -15,7 +15,10 @@ let songId = null; // The saved song this one was opened from or saved as.
 let songs = [];
 let peers = [];
 // While playing: when bar 0 started, in performance.now() time, and the tempo since then.
-const playback = { on: false, anchorTime: 0, anchorPulse: 0, bpm: 120, timer: null };
+// sim follows the song the way each grid does (see sync.js), so this page knows which bar
+// is playing however the song has moved. played is the song as it was when Play was pressed.
+const playback = { on: false, anchorTime: 0, anchorPulse: 0, bpm: 120, timer: null, played: null, sim: null, queued: null };
+const MOVE_NOTICE_MS = 250; // Time for a move to reach every grid before its bar starts.
 
 /* ---------- Saving in the browser ---------- */
 
@@ -166,6 +169,13 @@ function render() {
       toolButton("Copy", "Add a copy of this section after it", () => copySection(index)),
       toolButton("Del", "Delete this section", () => deleteSection(index)),
     );
+    // While playing, a section can be queued to play when the current one finishes.
+    const queued = playback.queued?.index === index;
+    const next = toolButton(queued ? "Queued" : "Next", queued ? "Plays when the current section finishes. Click to cancel." : "Play this section when the current one finishes",
+      () => queueSection(index), !playback.on);
+    next.className = "next-button";
+    next.setAttribute("aria-pressed", String(queued));
+    cell.append(next);
     tools.append(cell);
 
     const nameCell = document.createElement("td");
@@ -231,35 +241,159 @@ function render() {
 const msPerPulse = () => 60000 / (playback.bpm * PPQ);
 const pulseAt = (time) => playback.anchorPulse + (time - playback.anchorTime) / msPerPulse();
 
+// Section starts and ends, in bars, for the song that's playing.
+function sectionBounds(target, index) {
+  let start = 0;
+  for (let i = 0; i < index; i += 1) start += target.sections[i].bars;
+  return { start, end: start + target.sections[index].bars };
+}
+
 function renderPlaying() {
   $("play").textContent = playback.on ? "Stop" : "Play";
   $("play").setAttribute("aria-pressed", String(playback.on));
-  const total = Song.totalBars(song);
+  for (const id of ["section-back", "section-loop", "section-next"]) $(id).disabled = !playback.on;
   let current = null;
   let text = "";
+  const holding = Boolean(playback.on && (playback.sim.hold || pendingHold()));
+  $("section-loop").setAttribute("aria-pressed", String(holding));
   if (playback.on) {
-    let bar = Math.max(0, Math.floor(pulseAt(performance.now()) / BAR_PULSES));
-    if (song.loop) bar %= total;
-    const at = Song.sectionAt(song, Math.min(bar, total - 1));
+    const target = playback.played;
+    const total = Song.totalBars(target);
+    const at = Song.sectionAt(target, playback.sim.bar);
     current = at ? at.index : null;
-    if (at) text = `Bar ${Math.min(bar, total - 1) + 1} of ${total}: ${song.sections[at.index].name}, bar ${at.bar + 1}`;
+    if (at) {
+      text = `Bar ${playback.sim.bar + 1} of ${total}: ${target.sections[at.index].name}, bar ${at.bar + 1}`;
+      if (playback.sim.hold) text += ", looping";
+      if (playback.queued) text += `. Next: ${target.sections[playback.queued.index].name}`;
+    }
   }
   $("position").textContent = text;
   document.querySelectorAll("#table td").forEach((cell) => {
     cell.classList.toggle("playing", current !== null && Number(cell.dataset.section) === current);
   });
+  document.querySelectorAll(".next-button").forEach((button) => { button.disabled = !playback.on; });
 }
+
+// Whether a hold is on its way, so the Loop section button shows it at once.
+const pendingHold = () => {
+  const last = [...playback.sim.moves].reverse().find((move) => "hold" in move);
+  return last ? Boolean(last.hold) : false;
+};
 
 function tick() {
   if (!playback.on) return;
-  const bar = Math.floor(pulseAt(performance.now()) / BAR_PULSES);
+  const played = Math.floor(pulseAt(performance.now()) / BAR_PULSES);
   // The grids stop themselves at the end, so this page only catches up.
-  if (!song.loop && bar >= Song.totalBars(song)) {
-    stopPlaying();
-    setStatus("The song has ended.");
+  while (playback.sim.played < played) {
+    if (!Sync.songNextBar(playback.sim)) {
+      stopPlaying();
+      setStatus("The song has ended.");
+      return;
+    }
+  }
+  if (playback.queued && playback.sim.played >= playback.queued.atBar) {
+    playback.queued = null;
+    render();
     return;
   }
   renderPlaying();
+}
+
+// The first bar a move can safely happen on: the next one, or the one after if the next
+// starts too soon for the move to reach every grid.
+function nextSafeBar() {
+  const now = performance.now();
+  const played = Math.floor(pulseAt(now) / BAR_PULSES);
+  const nextStart = playback.anchorTime + ((played + 1) * BAR_PULSES - playback.anchorPulse) * msPerPulse();
+  return played + (nextStart - now < MOVE_NOTICE_MS ? 2 : 1);
+}
+
+function sendMove(data) {
+  const move = Sync.songMove(data, playback.sim.bars);
+  if (!move) return;
+  link.announceSongMove(move);
+  playback.sim.moves.push(move);
+}
+
+// The song bar that will be playing as a bar of playback starts, if nothing else moves it.
+function barAt(atBar) {
+  const look = JSON.parse(JSON.stringify(playback.sim));
+  while (look.played < atBar - 1) if (!Sync.songNextBar(look)) return null;
+  return look.bar;
+}
+
+// Jumps a section back or forward from the one playing, on the next bar.
+function skipSection(by) {
+  if (!playback.on) return;
+  const target = playback.played;
+  const atBar = nextSafeBar();
+  const bar = barAt(atBar);
+  if (bar === null) return;
+  const { index } = Song.sectionAt(target, bar);
+  let to = index + by;
+  if (to >= target.sections.length) {
+    if (!target.loop) {
+      setStatus("That's the last section. Turn on Loop to go round to the first.", true);
+      return;
+    }
+    to = 0;
+  }
+  to = Math.max(0, to);
+  sendMove({ atBar, toBar: sectionBounds(target, to).start, hold: null });
+  playback.queued = null;
+  render();
+  setStatus(`Jumping to "${target.sections[to].name}" on the next bar.`);
+}
+
+// Holds the section playing, so it repeats until Loop section is pressed again.
+function toggleSectionLoop() {
+  if (!playback.on) return;
+  const atBar = nextSafeBar();
+  if (playback.sim.hold || pendingHold()) {
+    sendMove({ atBar, hold: null });
+    setStatus("The section stops looping, and the song carries on after it.");
+  } else {
+    const target = playback.played;
+    const bar = barAt(atBar);
+    if (bar === null) return;
+    // The section the song is in on the bar the hold starts. On its first bar, that's the
+    // one just finishing, which is the one you hear.
+    const index = Song.sectionAt(target, bar).index;
+    const playingIndex = Song.sectionAt(target, playback.sim.bar).index;
+    const held = sectionBounds(target, bar === sectionBounds(target, index).start ? playingIndex : index);
+    sendMove({ atBar, hold: { start: held.start, end: held.end } });
+    setStatus(`Looping "${target.sections[Song.sectionAt(target, held.start).index].name}" until you press Loop section again.`);
+  }
+  renderPlaying();
+}
+
+// Queues a section to play when the current one has played through, or cancels it.
+function queueSection(index) {
+  if (!playback.on) return;
+  const target = playback.played;
+  if (playback.queued?.index === index) {
+    // Back to what would have happened: the held section again, or the next one.
+    const { atBar, end, hold } = playback.queued;
+    const natural = hold ? hold.start : end;
+    if (natural >= target.sections.reduce((sum, item) => sum + item.bars, 0) && !target.loop) {
+      setStatus("It's too late to cancel, as the song ends there.", true);
+      return;
+    }
+    sendMove({ atBar, toBar: natural >= Song.totalBars(target) ? 0 : natural, hold });
+    playback.queued = null;
+    render();
+    setStatus("Cancelled.");
+    return;
+  }
+  const playing = Song.sectionAt(target, playback.sim.bar);
+  const bounds = sectionBounds(target, playing.index);
+  const hold = playback.sim.hold;
+  const end = hold ? hold.end : bounds.end;
+  const atBar = Math.max(nextSafeBar(), playback.sim.played + (end - playback.sim.bar));
+  sendMove({ atBar, toBar: sectionBounds(target, index).start, hold: null });
+  playback.queued = { index, atBar, end, hold };
+  render();
+  setStatus(`"${target.sections[index].name}" plays when "${target.sections[playing.index].name}" finishes.`);
 }
 
 function startPlaying() {
@@ -267,25 +401,30 @@ function startPlaying() {
     setStatus("Open the grids in this browser, with Sync ticked, to play the song.", true);
     return;
   }
-  link.announceSong(Song.plan(song));
+  const plan = Song.plan(song);
+  link.announceSong(plan);
   const at = link.announcePlay(song.bpm);
   if (at === null) {
     setStatus("Couldn't reach the grids. Reload this page and try again.", true);
     return;
   }
-  Object.assign(playback, { on: true, anchorTime: at, anchorPulse: 0, bpm: song.bpm });
+  Object.assign(playback, {
+    on: true, anchorTime: at, anchorPulse: 0, bpm: song.bpm, queued: null,
+    played: JSON.parse(JSON.stringify(song)), sim: Sync.songStart({ bars: plan.bars, loop: plan.loop }),
+  });
   clearInterval(playback.timer);
   playback.timer = setInterval(tick, 100);
-  renderPlaying();
+  render();
   const playing = Song.INSTRUMENTS.filter((item) => peers.includes(item.name)).map((item) => item.label);
   setStatus(`Playing "${song.name || "Untitled"}" on ${playing.join(", ")}.`);
 }
 
 function stopPlaying() {
   playback.on = false;
+  playback.queued = null;
   clearInterval(playback.timer);
   $("bpm").value = String(song.bpm);
-  renderPlaying();
+  render();
 }
 
 function togglePlay() {
@@ -456,6 +595,9 @@ function bind() {
     }
   };
   $("loop").onchange = () => change(() => { song.loop = $("loop").checked; });
+  $("section-back").onclick = () => skipSection(-1);
+  $("section-next").onclick = () => skipSection(1);
+  $("section-loop").onclick = toggleSectionLoop;
   $("add-section").onclick = () => copySection(song.sections.length - 1);
   $("save").onclick = () => saveSong(false);
   $("save-new").onclick = () => saveSong(true);

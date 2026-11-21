@@ -28,6 +28,10 @@
   <label class="check" title="Starts the song again after its last section">
     <input id="loop" type="checkbox"> Loop
   </label>
+  <span class="divider" aria-hidden="true"></span>
+  <button id="section-back" type="button" title="Jump to the start of the section before, on the next bar" disabled>&#9664; Section</button>
+  <button id="section-loop" class="toggle" type="button" aria-pressed="false" title="Repeat the section playing until you press this again. The song then carries on after it." disabled>Loop section</button>
+  <button id="section-next" type="button" title="Jump to the start of the next section, on the next bar" disabled>Section &#9654;</button>
   <span id="position" class="position" aria-live="off"></span>
   <div class="spacer"></div>
   <span id="peers" class="pill" role="status">Not linked</span>
@@ -115,6 +119,9 @@
       <li><b>Play</b> starts every linked grid at the song's <b>BPM</b>, and <b>Stop</b> stops them. Space does both. Stop on a grid stops them all too.</li>
       <li>The section playing is highlighted, with the bar above. At the end the grids stop, unless <b>Loop</b> is on.</li>
       <li>Changing the BPM while it plays changes it on every grid.</li>
+      <li><b>Loop section</b> repeats the section playing until you press it again, then the song carries on after it. <b>&#9664; Section</b> and <b>Section &#9654;</b> jump to the start of the section before or after, on the next bar.</li>
+      <li><b>Next</b>, above each section, plays that section when the one playing finishes, even if it's looping. It shows <b>Queued</b> until then, and clicking it again cancels it.</li>
+      <li>Changes to the arrangement while it plays take effect the next time you press Play.</li>
       <li>While a song plays, the grids switch patterns themselves. Pressing Play on a grid plays it on its own as usual, without the song.</li>
     </ul>
 

@@ -84,7 +84,7 @@ select, input[type="number"], input[type="text"], button {
   font: inherit;
 }
 input[type="number"] { width: 72px; }
-#song-name { width: 180px; }
+#song-name { width: 130px; }
 button { cursor: pointer; padding: 0 11px; }
 button:hover:not(:disabled) { border-color: var(--muted); }
 button:disabled { opacity: 0.45; cursor: default; }
@@ -93,7 +93,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 
 .pill { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .pill.ok { color: var(--ok); border-color: var(--ok); }
-.position { min-width: 170px; color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; }
+.position { color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
 
 .main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; padding: 14px; align-items: start; }
 @media (max-width: 1000px) { .main { grid-template-columns: minmax(0, 1fr); } }
@@ -159,3 +159,6 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .tool-menu nav hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--line); }
 .tool-menu nav button { height: auto; padding: 7px 10px; color: var(--text); text-align: left; background: none; border: 0; border-radius: 4px; font-size: 13px; }
 .tool-menu nav button:hover { background: var(--panel-2); }
+.divider { width: 1px; height: 22px; background: var(--line); }
+.toggle[aria-pressed="true"], .next-button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 700; }
+header.bar { gap: 6px 10px; }
