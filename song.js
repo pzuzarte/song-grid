@@ -1,26 +1,42 @@
 "use strict";
 /* A song: sections in order, each some bars long, with the pattern each grid plays in it,
    or none. Kept apart from the page so it can be tested. plan() turns a song into what
-   the grids follow, as sent through sync.js. */
+   the grids follow, as sent through sync.js.
+
+   Most grids have 16 numbered patterns, counted here from 0. TD-3 Grid edits one pattern
+   at a time, so its part names either "grid", the pattern in its grid, or the id of a
+   pattern in its library. null is silence for every grid. */
 const Song = (() => {
   const INSTRUMENTS = [
     { name: "S-1 Grid", label: "S-1", url: "https://pzuzarte.github.io/s1-grid/" },
     { name: "Protein Grid", label: "Protein", url: "https://pzuzarte.github.io/protein-grid/" },
     { name: "Bass Station Grid", label: "Bass Station", url: "https://pzuzarte.github.io/bass-station-grid/" },
+    { name: "MPC Grid", label: "MPC", url: "https://pzuzarte.github.io/mpc-grid/", word: "Sequence" },
+    { name: "TD-3 Grid", label: "TD-3", url: "https://pzuzarte.github.io/td3-grid/", library: true },
   ];
+  const GRID = "grid"; // TD-3 Grid's own pattern, rather than one from its library.
   const PATTERNS = 16;
   const BAR_CHOICES = [1, 2, 4, 8, 12, 16, 24, 32, 64];
   const MAX_SECTIONS = 64;
 
   const newId = () => `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
-  // A pattern number counted from 0, or null for silence.
-  const cleanPattern = (value) => (Number.isInteger(value) && value >= 0 && value < PATTERNS ? value : null);
+  // A grid's pattern, checked, or null for silence.
+  function cleanPattern(instrument, value) {
+    if (instrument.library) return typeof value === "string" && value.length > 0 && value.length <= 64 ? value : null;
+    return Number.isInteger(value) && value >= 0 && value < PATTERNS ? value : null;
+  }
 
-  function section(fields = {}) {
+  const firstPattern = (instrument) => (instrument.library ? GRID : 0);
+
+  // A grid missing from a saved section is silent in it, so older songs play as they did.
+  // A new section starts every grid on its first pattern.
+  function section(fields = {}, { fill = true } = {}) {
     const patterns = {};
-    for (const { name } of INSTRUMENTS) {
-      patterns[name] = fields.patterns && name in fields.patterns ? cleanPattern(fields.patterns[name]) : 0;
+    for (const instrument of INSTRUMENTS) {
+      const { name } = instrument;
+      if (fields.patterns && name in fields.patterns) patterns[name] = cleanPattern(instrument, fields.patterns[name]);
+      else patterns[name] = fill ? firstPattern(instrument) : null;
     }
     return {
       id: typeof fields.id === "string" ? fields.id : newId(),
@@ -47,7 +63,7 @@ const Song = (() => {
     if (Number.isFinite(data.bpm) && data.bpm >= 20 && data.bpm <= 300) song.bpm = Math.round(data.bpm * 10) / 10;
     song.loop = Boolean(data.loop);
     if (Array.isArray(data.sections) && data.sections.length) {
-      song.sections = data.sections.slice(0, MAX_SECTIONS).map(section);
+      song.sections = data.sections.slice(0, MAX_SECTIONS).map((item) => section(item, { fill: false }));
       // Each section needs its own id, as copies are moved about separately.
       const ids = new Set();
       for (const item of song.sections) {
@@ -83,7 +99,7 @@ const Song = (() => {
     return null;
   }
 
-  return { BAR_CHOICES, INSTRUMENTS, MAX_SECTIONS, PATTERNS, cleanSong, newSong, plan, section, sectionAt, totalBars };
+  return { BAR_CHOICES, GRID, INSTRUMENTS, MAX_SECTIONS, PATTERNS, cleanSong, newSong, plan, section, sectionAt, totalBars };
 })();
 
 if (typeof module !== "undefined") module.exports = Song;

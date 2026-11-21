@@ -70,15 +70,34 @@ function change(edit) {
   render();
 }
 
-function patternSelect(item, name) {
+// TD-3 Grid keeps its patterns in its library, in this browser, which this page shares.
+function td3Library() {
+  const items = readJson("td3-grid-library", []);
+  return Array.isArray(items) ? items.filter((item) => item && typeof item.id === "string" && typeof item.name === "string") : [];
+}
+
+function patternSelect(item, instrument) {
+  const { name } = instrument;
   const select = document.createElement("select");
-  select.append(new Option("Off", ""), ...Array.from({ length: Song.PATTERNS }, (_, index) => new Option(`Pattern ${index + 1}`, String(index))));
   const value = item.patterns[name];
+  if (instrument.library) {
+    const saved = td3Library();
+    select.append(new Option("Off", ""), new Option("Grid pattern", Song.GRID),
+      ...saved.map((entry) => new Option(entry.name, entry.id)));
+    if (value && value !== Song.GRID && !saved.some((entry) => entry.id === value)) {
+      select.append(new Option("(not in the library)", value));
+    }
+  } else {
+    const word = instrument.word || "Pattern";
+    select.append(new Option("Off", ""), ...Array.from({ length: Song.PATTERNS }, (_, index) => new Option(`${word} ${index + 1}`, String(index))));
+  }
   select.value = value === null ? "" : String(value);
   select.classList.toggle("off", value === null);
   select.setAttribute("aria-label", `${name} in ${item.name}`);
+  select.title = instrument.library ? "The pattern in TD-3 Grid, or one from its library, or Off" : "";
   select.onchange = () => change(() => {
-    item.patterns[name] = select.value === "" ? null : Number(select.value);
+    if (select.value === "") item.patterns[name] = null;
+    else item.patterns[name] = instrument.library ? select.value : Number(select.value);
   });
   return select;
 }
@@ -197,7 +216,7 @@ function render() {
     song.sections.forEach((item, index) => {
       const cell = document.createElement("td");
       cell.dataset.section = String(index);
-      cell.append(patternSelect(item, instrument.name));
+      cell.append(patternSelect(item, instrument));
       row.append(cell);
     });
     rows.push(row);
@@ -245,7 +264,7 @@ function tick() {
 
 function startPlaying() {
   if (!peers.some((name) => Song.INSTRUMENTS.some((item) => item.name === name))) {
-    setStatus("Open S-1 Grid, Protein Grid or Bass Station Grid in this browser, with Sync ticked, to play the song.", true);
+    setStatus("Open the grids in this browser, with Sync ticked, to play the song.", true);
     return;
   }
   link.announceSong(Song.plan(song));
@@ -418,6 +437,7 @@ function setTheme(light) {
 }
 
 function bind() {
+  window.addEventListener("storage", (event) => { if (event.key === "td3-grid-library") render(); });
   $("play").onclick = togglePlay;
   $("song-name").onchange = () => change(() => { song.name = $("song-name").value.trim().slice(0, 40); });
   $("bpm").onchange = () => {

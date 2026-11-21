@@ -6,10 +6,10 @@ Arranges the patterns you've made in the grid editors into a song, and plays the
 on your instruments. It makes no sound itself: it tells each open grid which pattern to
 play, and when.
 
-It works with [S-1 Grid](https://pzuzarte.github.io/s1-grid/),
+It works with [S-1 Grid](https://pzuzarte.github.io/s1-grid/), [MPC Grid](https://pzuzarte.github.io/mpc-grid/), [TD-3 Grid](https://pzuzarte.github.io/td3-grid/),
 [Protein Grid](https://pzuzarte.github.io/protein-grid/) and
 [Bass Station Grid](https://pzuzarte.github.io/bass-station-grid/), open in other tabs of the
-same browser with Sync ticked. Unofficial, and not affiliated with Roland, Waldorf or Novation.
+same browser with Sync ticked. Unofficial, and not affiliated with Roland, Waldorf, Novation, Akai or Behringer.
 
 Visits to the page are counted anonymously with
 [GoatCounter](https://www.goatcounter.com/help/privacy), which uses no cookies.
