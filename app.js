@@ -587,7 +587,8 @@ const labelOf = (name) => Song.INSTRUMENTS.find((item) => item.name === name)?.l
 const hasAssets = (name) => Boolean(song.assets[name] && (song.assets[name].patterns.length || song.assets[name].sound));
 const joinNames = (names) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names.join(""));
 
-function loadInto(names) {
+// Puts a song's assets back into grids. only, for one grid, sends just those assets.
+function loadInto(names, only = null) {
   const targets = names.filter((name) => peers.includes(name) && hasAssets(name));
   if (!targets.length) {
     setStatus(names.some(hasAssets) ? "Open the grids in this browser, with Sync ticked, to put the assets back into them." : "This song has no assets to put back. Collect them first.", true);
@@ -596,7 +597,7 @@ function loadInto(names) {
   clearTimeout(loading?.timer);
   loading = { requests: new Map(), results: new Map() };
   for (const name of targets) {
-    const { patterns, sound } = song.assets[name];
+    const { patterns, sound } = only || song.assets[name];
     const request = link.sendAssets(name, { patterns, sound });
     if (request) loading.requests.set(request, name);
   }
@@ -606,7 +607,7 @@ function loadInto(names) {
   }
   loading.timer = setTimeout(finishLoading, LOAD_WAIT_MS);
   renderAssets();
-  setStatus(`Putting this song's assets back into ${joinNames(targets.map(labelOf))}...`);
+  setStatus(only ? `Putting ${only.sound ? only.sound.label : only.patterns[0]?.label} into ${labelOf(targets[0])}...` : `Putting this song's assets back into ${joinNames(targets.map(labelOf))}...`);
 }
 
 function assetsLoaded(from, result, request) {
@@ -634,6 +635,144 @@ function finishLoading() {
   setStatus(parts.join(" "), problems.length > 0 || silent.length > 0);
 }
 
+/* ---------- Picking assets from a grid ---------- */
+
+// The grid being picked from, what it offered, and what's ticked.
+let picker = null;
+const PICKER_SHOWN = 300; // Rows shown per list; searching narrows a long library.
+
+async function openPicker(name) {
+  picker = { name, catalog: null, error: "", search: "", favourites: false, ticked: new Set(), sound: "", busy: false };
+  $("picker-title").textContent = `Add from ${labelOf(name)}`;
+  $("picker-search").value = "";
+  renderPicker();
+  $("picker").showModal();
+  try {
+    const catalog = await link.ask(name, "catalog");
+    if (picker?.name !== name) return;
+    picker.catalog = {
+      grid: Array.isArray(catalog?.grid) ? catalog.grid : [],
+      patterns: Array.isArray(catalog?.patterns) ? catalog.patterns : [],
+      sounds: Array.isArray(catalog?.sounds) ? catalog.sounds : [],
+      note: typeof catalog?.note === "string" ? catalog.note : "",
+    };
+  } catch (error) {
+    if (picker?.name === name) picker.error = error.message;
+  }
+  renderPicker();
+  $("picker-search").focus();
+}
+
+function closePicker() {
+  picker = null;
+  if ($("picker").open) $("picker").close();
+}
+
+function pickerRow(item, type, kept) {
+  const row = document.createElement("label");
+  row.className = "picker-row";
+  const input = document.createElement("input");
+  input.type = type;
+  input.name = type === "radio" ? "picker-sound" : "";
+  input.value = item.id;
+  input.checked = type === "radio" ? picker.sound === item.id : picker.ticked.has(item.id);
+  input.onchange = () => {
+    if (type === "radio") picker.sound = input.value;
+    else if (input.checked) picker.ticked.add(item.id);
+    else picker.ticked.delete(item.id);
+    renderPickerCount();
+  };
+  const text = document.createElement("span");
+  text.className = "picker-text";
+  text.append(Object.assign(document.createElement("span"), { className: "name", textContent: String(item.label || item.id) }));
+  if (item.meta) text.append(Object.assign(document.createElement("small"), { textContent: String(item.meta) }));
+  row.append(input, text);
+  if (item.favourite) row.append(Object.assign(document.createElement("span"), { className: "star", textContent: "\u2605", title: "A favourite" }));
+  if (kept) row.append(Object.assign(document.createElement("span"), { className: "used", textContent: "In song" }));
+  return row;
+}
+
+function renderPicker() {
+  const body = $("picker-body");
+  $("picker-favourites").setAttribute("aria-pressed", String(Boolean(picker?.favourites)));
+  if (!picker) return;
+  if (picker.error || !picker.catalog) {
+    const text = picker.error || `Asking ${picker.name} what it has...`;
+    body.replaceChildren(Object.assign(document.createElement("p"), { className: picker.error ? "muted error-text" : "muted", textContent: text }));
+    renderPickerCount();
+    return;
+  }
+  const words = picker.search.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = (items) => items.filter((item) => (!picker.favourites || item.favourite)
+    && words.every((word) => `${item.label} ${item.meta || ""}`.toLowerCase().includes(word)));
+  const keptIds = new Set((song.assets[picker.name]?.patterns || []).map((item) => item.id));
+  const parts = [];
+  const group = (title, items, type, empty) => {
+    const list = shown(items);
+    const box = Object.assign(document.createElement("section"), { className: "picker-group" });
+    box.append(Object.assign(document.createElement("h3"), { textContent: title }));
+    if (type === "radio") box.append(pickerRow({ id: "", label: song.assets[picker.name]?.sound ? `Keep "${song.assets[picker.name].sound.label}"` : "No sound", meta: "Leaves the song's sound as it is" }, "radio", false));
+    for (const item of list.slice(0, PICKER_SHOWN)) box.append(pickerRow(item, type, type !== "radio" && keptIds.has(item.id)));
+    if (list.length > PICKER_SHOWN) box.append(Object.assign(document.createElement("p"), { className: "muted", textContent: `Showing ${PICKER_SHOWN} of ${list.length}. Search to find the others.` }));
+    if (!list.length) box.append(Object.assign(document.createElement("p"), { className: "muted", textContent: items.length ? "None match." : empty }));
+    parts.push(box);
+  };
+  const { catalog } = picker;
+  const instrument = Song.INSTRUMENTS.find((item) => item.name === picker.name);
+  const word = instrument?.word ? "sequences" : "patterns";
+  group(instrument?.library ? "In the grid now" : `In the grid now, by ${instrument?.word ? "sequence" : "pattern"} number`, catalog.grid, "checkbox", `No ${word} with notes in it.`);
+  if (catalog.patterns.length || !instrument?.word) group(instrument?.library ? "In its library" : "Saved in its library", catalog.patterns, "checkbox", catalog.note ? "Its library isn't open." : "No saved patterns.");
+  if (catalog.sounds.length || !(instrument?.library || instrument?.word)) group("Sound for this song", catalog.sounds, "radio", catalog.note ? "Its library isn't open." : "No sounds to pick from.");
+  if (catalog.note) parts.push(Object.assign(document.createElement("p"), { className: "muted", textContent: catalog.note }));
+  body.replaceChildren(...parts);
+  renderPickerCount();
+}
+
+function renderPickerCount() {
+  const count = picker ? picker.ticked.size : 0;
+  const sound = Boolean(picker?.sound);
+  $("picker-count").textContent = !picker?.catalog ? "" : count || sound
+    ? `${count ? `${count} pattern${count === 1 ? "" : "s"}` : ""}${count && sound ? " and " : ""}${sound ? "a sound" : ""} picked`
+    : "Tick what this song needs.";
+  $("picker-add").disabled = !picker?.catalog || picker.busy || (!count && !sound);
+}
+
+// Copies what's ticked from the grid into the song's assets.
+async function addPicked() {
+  if (!picker?.catalog || picker.busy) return;
+  const { name } = picker;
+  picker.busy = true;
+  renderPickerCount();
+  let got;
+  try {
+    got = await link.ask(name, "fetch", { patterns: [...picker.ticked], sound: picker.sound || null }, 10000);
+  } catch (error) {
+    if (picker?.name === name) {
+      picker.busy = false;
+      $("picker-count").textContent = error.message;
+      renderPickerCount();
+      setStatus(error.message, true);
+    }
+    return;
+  }
+  // Closing the picker while it waited cancels the add.
+  if (picker?.name !== name) return;
+  const patterns = Array.isArray(got?.patterns) ? got.patterns : [];
+  const sound = got?.sound && typeof got.sound.label === "string" ? got.sound : null;
+  let result = { added: 0, full: 0 };
+  change(() => { result = Song.addAssets(song, name, { patterns, sound }); });
+  closePicker();
+  const parts = [];
+  if (result.added) parts.push(`${result.added} pattern${result.added === 1 ? "" : "s"}`);
+  if (sound) parts.push(`the sound "${sound.label}"`);
+  const full = result.full ? ` ${result.full} didn't fit, as every pattern number holds one. Remove some first.` : "";
+  setStatus(parts.length ? `Added ${parts.join(" and ")} from ${labelOf(name)}. Load puts ${result.added + (sound ? 1 : 0) === 1 ? "it" : "them"} into the grid.${full}` : `Nothing was added from ${labelOf(name)}.${full}`, Boolean(result.full) || !parts.length);
+}
+
+function moveAssetTo(name, id, ref) {
+  change(() => Song.moveAsset(song, name, id, ref));
+}
+
 function removeAsset(name, id) {
   change(() => {
     const kept = song.assets[name];
@@ -656,9 +795,9 @@ function renderAssets() {
     else if (waiting) note.textContent = "Putting back...";
     else if (kept) note.textContent = `Collected ${shortDate(kept.collected)}: ${kept.patterns.length} pattern${kept.patterns.length === 1 ? "" : "s"}${kept.sound ? ", sound" : ""}`;
     else note.textContent = "Nothing kept yet";
-    const button = toolButton("Collect", peers.includes(instrument.name) ? `Copy ${instrument.name}'s patterns${instrument.library || instrument.word ? "" : " and sound"} into this song` : `Open ${instrument.name}, with Sync ticked, to collect from it`,
-      () => collect([instrument.name]), !peers.includes(instrument.name) || busy);
     const open = peers.includes(instrument.name);
+    const button = toolButton("Add", open ? `Pick patterns${instrument.library || instrument.word ? "" : " and a sound"} from ${instrument.name} and its library to keep with this song` : `Open ${instrument.name}, with Sync ticked, to pick from it`,
+      () => openPicker(instrument.name), !open || busy);
     const load = toolButton("Load", !hasAssets(instrument.name) ? "Nothing is kept from this grid yet"
       : open ? `Put this song's ${instrument.label} patterns${kept.sound ? " and sound" : ""} back into ${instrument.name}` : `Open ${instrument.name}, with Sync ticked, to put them back into it`,
     () => loadInto([instrument.name]), !open || !hasAssets(instrument.name) || busy);
@@ -666,11 +805,30 @@ function renderAssets() {
     group.append(head);
     if (kept) {
       const list = Object.assign(document.createElement("ul"), { className: "asset-items" });
+      const loadable = open && !busy;
       for (const item of kept.patterns) {
         const row = document.createElement("li");
-        row.append(Object.assign(document.createElement("span"), { className: "name", textContent: item.label, title: item.label }));
+        const text = Object.assign(document.createElement("span"), { className: "asset-text" });
+        text.append(Object.assign(document.createElement("span"), { className: "name", textContent: item.label, title: item.label }),
+          Object.assign(document.createElement("span"), { className: "meta", textContent: `${item.length}${item.length ? ", " : ""}${item.notes} note${item.notes === 1 ? "" : "s"}` }));
+        row.append(text);
         if (Song.usesPattern(song, instrument.name, item.ref)) row.append(Object.assign(document.createElement("span"), { className: "used", textContent: "Used" }));
-        row.append(Object.assign(document.createElement("span"), { className: "meta", textContent: `${item.length}${item.length ? ", " : ""}${item.notes} note${item.notes === 1 ? "" : "s"}` }));
+        if (!instrument.library && !instrument.word) {
+          // Which pattern number it goes in, in the grid and in the arrangement.
+          const slot = document.createElement("select");
+          slot.className = "slot-select";
+          slot.append(...Array.from({ length: Song.PATTERNS }, (_, index) => new Option(`Pattern ${index + 1}`, String(index))));
+          slot.value = String(item.ref);
+          slot.title = "The pattern number it goes in when it's loaded. Choosing one used by another swaps them.";
+          slot.setAttribute("aria-label", `Pattern number for ${item.label}`);
+          slot.onchange = () => moveAssetTo(instrument.name, item.id, Number(slot.value));
+          row.append(slot);
+        }
+        const send = toolButton("\u2191", loadable ? `Put ${item.label} into ${instrument.name} now` : `Open ${instrument.name}, with Sync ticked, to load it`,
+          () => loadInto([instrument.name], { patterns: [item], sound: null }), !loadable);
+        send.className = "load-one";
+        send.setAttribute("aria-label", `Load ${item.label}`);
+        row.append(send);
         const remove = toolButton("\u00d7", `Remove ${item.label} from this song's assets`, () => removeAsset(instrument.name, item.id));
         remove.setAttribute("aria-label", `Remove ${item.label}`);
         row.append(remove);
@@ -679,6 +837,11 @@ function renderAssets() {
       if (kept.sound) {
         const row = Object.assign(document.createElement("li"), { className: "sound" });
         row.append(Object.assign(document.createElement("span"), { className: "name", textContent: kept.sound.label, title: kept.sound.label }));
+        const send = toolButton("\u2191", loadable ? `Send this sound to ${instrument.name} now` : `Open ${instrument.name}, with Sync ticked, to send it`,
+          () => loadInto([instrument.name], { patterns: [], sound: kept.sound }), !loadable);
+        send.className = "load-one";
+        send.setAttribute("aria-label", `Load ${instrument.label} sound`);
+        row.append(send);
         const remove = toolButton("\u00d7", "Remove the sound from this song's assets", () => removeAsset(instrument.name, "sound"));
         remove.setAttribute("aria-label", `Remove ${instrument.label} sound`);
         row.append(remove);
@@ -815,6 +978,12 @@ function bind() {
   $("add-section").onclick = () => copySection(song.sections.length - 1);
   $("collect-all").onclick = () => collect(Song.INSTRUMENTS.map((item) => item.name));
   $("load-all").onclick = () => loadInto(Song.INSTRUMENTS.map((item) => item.name));
+  $("picker-close").onclick = closePicker;
+  $("picker-cancel").onclick = closePicker;
+  $("picker").addEventListener("close", () => { picker = null; });
+  $("picker-add").onclick = addPicked;
+  $("picker-search").oninput = () => { if (picker) { picker.search = $("picker-search").value; renderPicker(); } };
+  $("picker-favourites").onclick = () => { if (picker) { picker.favourites = !picker.favourites; renderPicker(); } };
   $("save").onclick = () => saveSong(false);
   $("save-new").onclick = () => saveSong(true);
   $("new-song").onclick = () => {

@@ -116,3 +116,30 @@ test("a song keeps the assets collected from each grid", () => {
   assert.equal(Song.usesPattern(song, "TD-3 Grid", "pacid"), true);
   assert.deepEqual(Song.newSong().assets, {});
 });
+
+test("patterns picked from a library go where the arrangement needs them", () => {
+  const song = Song.cleanSong({ sections: [
+    { name: "A", bars: 4, patterns: { "S-1 Grid": 3 } },
+    { name: "B", bars: 4, patterns: { "S-1 Grid": 7 } },
+  ] });
+  const pattern = (id, ref = null) => ({ id, ref, label: id, length: "1 bar", notes: 1, data: { bars: 1, notes: [] } });
+  // A pattern from slot 7 keeps its number. Library ones fill 3, then the first free.
+  let result = Song.addAssets(song, "S-1 Grid", { patterns: [pattern("slot:7", 7), pattern("patch:Acid"), pattern("patch:Bell")] }, "t1");
+  assert.deepEqual(result, { added: 3, full: 0 });
+  assert.deepEqual(song.assets["S-1 Grid"].patterns.map((item) => [item.id, item.ref]), [["patch:Bell", 0], ["patch:Acid", 3], ["slot:7", 7]]);
+  // Picking one again keeps it where it is. A pattern for a number already used replaces it.
+  Song.addAssets(song, "S-1 Grid", { patterns: [pattern("patch:Acid"), pattern("slot:0", 0)], sound: { label: "Warm", data: { values: { 74: 9 } } } }, "t2");
+  assert.deepEqual(song.assets["S-1 Grid"].patterns.map((item) => [item.id, item.ref]), [["slot:0", 0], ["patch:Acid", 3], ["slot:7", 7]]);
+  assert.equal(song.assets["S-1 Grid"].sound.label, "Warm");
+  assert.equal(song.assets["S-1 Grid"].collected, "t2");
+  // Moving one swaps it with the pattern in the number it moves to.
+  Song.moveAsset(song, "S-1 Grid", "patch:Acid", 7);
+  assert.deepEqual(song.assets["S-1 Grid"].patterns.map((item) => [item.id, item.ref]), [["slot:0", 0], ["slot:7", 3], ["patch:Acid", 7]]);
+  // Once every number holds a pattern, more don't fit.
+  const many = Array.from({ length: 16 }, (_, index) => pattern(`p${index}`));
+  result = Song.addAssets(song, "S-1 Grid", { patterns: many });
+  assert.deepEqual(result, { added: 13, full: 3 });
+  // TD-3 Grid's library patterns keep their ids as refs.
+  Song.addAssets(song, "TD-3 Grid", { patterns: [{ ...pattern("td3:p1", "p1") }] });
+  assert.deepEqual(song.assets["TD-3 Grid"].patterns.map((item) => item.ref), ["p1"]);
+});

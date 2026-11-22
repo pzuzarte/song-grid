@@ -81,6 +81,62 @@ const Song = (() => {
     return assets;
   }
 
+  /* Adds patterns and a sound picked from a grid to a song's assets. A pattern already kept
+     is replaced, by its id. A pattern from a grid's slot or TD-3 Grid's library comes with
+     its ref. One from a library comes without one (null), and goes in the first pattern
+     number the arrangement plays that has nothing kept for it, or else the first free one.
+     Each pattern number holds one pattern, so a pattern put in one replaces what was there.
+     Gives how many patterns were added, and how many didn't fit. */
+  function addAssets(song, name, { patterns = [], sound = null } = {}, collected = new Date().toISOString()) {
+    const instrument = INSTRUMENTS.find((item) => item.name === name);
+    if (!instrument) return { added: 0, full: 0 };
+    const kept = song.assets[name] || { collected: "", patterns: [], sound: null };
+    let added = 0;
+    let full = 0;
+    for (const entry of patterns) {
+      const same = kept.patterns.findIndex((item) => item.id === entry.id);
+      let ref = entry.ref ?? (same >= 0 ? kept.patterns[same].ref : null);
+      if (same >= 0) kept.patterns.splice(same, 1);
+      if (ref === null || ref === undefined) {
+        ref = freeSlot(song, name, kept.patterns);
+        if (ref === null) {
+          full += 1;
+          continue;
+        }
+      }
+      if (!instrument.library && !(Number.isInteger(ref) && ref >= 0 && ref < PATTERNS)) continue;
+      kept.patterns = kept.patterns.filter((item) => item.ref !== ref);
+      kept.patterns.push({ ...entry, ref });
+      added += 1;
+    }
+    if (sound) kept.sound = sound;
+    kept.collected = collected;
+    if (!instrument.library) kept.patterns.sort((a, b) => a.ref - b.ref);
+    song.assets[name] = cleanAssets({ [name]: kept })[name];
+    return { added, full };
+  }
+
+  // The pattern number a library pattern goes in, or null if every one holds a pattern.
+  function freeSlot(song, name, patterns) {
+    const taken = new Set(patterns.map((item) => item.ref));
+    const played = song.sections.map((item) => item.patterns[name]).filter((ref) => Number.isInteger(ref));
+    const first = played.find((ref) => !taken.has(ref));
+    if (first !== undefined) return first;
+    for (let ref = 0; ref < PATTERNS; ref += 1) if (!taken.has(ref)) return ref;
+    return null;
+  }
+
+  // Moves a kept pattern to another pattern number, swapping with the one there if any.
+  function moveAsset(song, name, id, ref) {
+    const kept = song.assets[name];
+    const item = kept?.patterns.find((entry) => entry.id === id);
+    if (!item || !Number.isInteger(ref) || ref < 0 || ref >= PATTERNS) return;
+    const other = kept.patterns.find((entry) => entry.ref === ref && entry !== item);
+    if (other) other.ref = item.ref;
+    item.ref = ref;
+    kept.patterns.sort((a, b) => a.ref - b.ref);
+  }
+
   // Whether the arrangement plays a pattern, by the ref it knows it by.
   const usesPattern = (song, name, ref) => song.sections.some((item) => item.patterns[name] === ref);
 
@@ -142,7 +198,7 @@ const Song = (() => {
     return null;
   }
 
-  return { BAR_CHOICES, GRID, INSTRUMENTS, MAX_SECTIONS, PATTERNS, bounds, cleanAssets, cleanSong, loops, newSong, plan, section, sectionAt, totalBars, usesPattern };
+  return { BAR_CHOICES, GRID, INSTRUMENTS, MAX_SECTIONS, PATTERNS, addAssets, bounds, cleanAssets, cleanSong, loops, moveAsset, newSong, plan, section, sectionAt, totalBars, usesPattern };
 })();
 
 if (typeof module !== "undefined") module.exports = Song;

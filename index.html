@@ -74,7 +74,7 @@
       <button id="load-all" type="button" title="Puts this song's patterns back into the linked grids, in the slots they came from, and sends the sounds" disabled>Load all</button>
     </div>
     <div id="asset-list" class="asset-list"></div>
-    <p class="muted hint">The patterns and sounds this song uses, kept with it. Collect copies them from the open grids, replacing what was kept from that grid before. Load puts them back into the grids, in the slots they came from, and sends the sounds. Remove anything the song doesn't need with &times;. Patterns the arrangement plays are marked Used.</p>
+    <p class="muted hint">The patterns and sounds this song uses, kept with it. Add picks them from a grid and its library. Collect all copies everything in the open grids. Load puts them into the grids, and &uarr; loads just one. Remove anything the song doesn't need with &times;. Patterns the arrangement plays are marked Used.</p>
   </section>
 
   <section class="card songs" aria-labelledby="songs-title">
@@ -141,12 +141,14 @@
     <h3>Assets</h3>
     <ul>
       <li>The <b>Assets</b> panel keeps the patterns and sounds this song uses, with the song, so they're in one place and saved with it, in its backups too.</li>
-      <li><b>Collect all</b> asks every linked grid for its patterns, and its sound where it has one. <b>Collect</b> beside a grid asks just that one. Collecting again replaces what was kept from that grid.</li>
-      <li>From S-1 Grid, Protein Grid and Bass Station Grid it keeps every pattern with notes or knob movements. From MPC Grid it keeps its sequences, and from TD-3 Grid its grid pattern and its library patterns.</li>
-      <li>Sounds: S-1 Grid's sound controls, Protein Grid's mapped settings, and the sound the Bass Station is playing, read from it. The TD-3 and the MPC have no sound to keep this way: the TD-3's is set by its knobs, and the MPC's samples stay in its project.</li>
+      <li><b>Add</b>, beside a grid, lists what it has: the patterns in it now, the patterns saved in its library, and sounds. Tick the ones this song needs, choose a sound if you want one, and press <b>Add to song</b>. Search, and <b>&#9733; Favourites</b>, narrow a long library.</li>
+      <li>What each offers: S-1 Grid, its patterns and the patches in its library, as patterns and as sounds. Protein Grid and Bass Station Grid, their patterns, the patterns saved in their library folder, and the sounds in their sound library. MPC Grid, the sequences in the open project. TD-3 Grid, its grid pattern and its library. The grid needs its library folder open to list it.</li>
+      <li>A song keeps one sound for each grid: the one you pick replaces the one it had. Protein Grid reads only the settings you've mapped from a sound, so click Teach reading on its Synth tab once first. The TD-3 and the MPC have no sound to keep: the TD-3's is set by its knobs, and the MPC's samples stay in its project.</li>
+      <li>Each pattern kept goes in a pattern number, shown beside it. One from a grid keeps its own. One from a library goes in the first number the arrangement plays that has nothing kept for it, or else the first free one. Choose another number to move it, which swaps it with the pattern there.</li>
+      <li><b>Collect all</b> copies everything in every linked grid at once: each pattern with notes or knob movements, and the sound in its controls, or the one the Bass Station is playing. It replaces what was kept from each grid before.</li>
       <li>Patterns the arrangement plays are marked <b>Used</b>. Remove anything the song doesn't need with &times;.</li>
-      <li><b>Load all</b> puts the song's assets back into every linked grid, and <b>Load</b> beside a grid puts back just its own. Use it after opening a song, so each grid has the patterns the song was made with.</li>
-      <li>Each pattern goes back into the slot it came from, replacing what's there. Other slots aren't touched. <b>Undo</b> in the grid brings back what was there. In MPC Grid each sequence is undone separately.</li>
+      <li><b>Load all</b> puts the song's assets into every linked grid, <b>Load</b> beside a grid puts in just its own, and <b>&uarr;</b> beside a pattern or sound puts in just that one. Use it after opening a song, so each grid has the patterns the song needs.</li>
+      <li>Each pattern goes into its pattern number, replacing what's there. Other slots aren't touched. <b>Undo</b> in the grid brings back what was there. In MPC Grid each sequence is undone separately.</li>
       <li>MPC Grid puts its sequences back into the open project, by number, on the track being edited. They reach the MPC when you save there. TD-3 Grid puts its grid pattern back in the grid, and adds library patterns its library doesn't have.</li>
       <li>Sounds are sent straight to the instruments: S-1 Grid's and Protein Grid's controls are set and sent, and the Bass Station's sound is sent through its editor. Undo doesn't bring a sound back, so save one you want to keep first.</li>
     </ul>
@@ -157,6 +159,24 @@
       <li>Songs point to pattern numbers in each grid, so changing a grid's pattern changes the song too.</li>
       <li><b>Back up</b> downloads every saved song as a file, and <b>Restore</b> adds songs from one.</li>
     </ul>
+  </div>
+</dialog>
+
+<dialog id="picker" class="help picker" aria-labelledby="picker-title">
+  <div class="help-head">
+    <h2 id="picker-title">Add</h2>
+    <button id="picker-close" type="button">Close</button>
+  </div>
+  <div class="picker-tools">
+    <input id="picker-search" type="search" placeholder="Search" spellcheck="false" aria-label="Search">
+    <button id="picker-favourites" type="button" class="toggle" aria-pressed="false" title="Shows only the favourites starred in the grid's library">&#9733; Favourites</button>
+  </div>
+  <div id="picker-body" class="picker-body"></div>
+  <div class="picker-foot">
+    <span id="picker-count" class="muted"></span>
+    <div class="spacer"></div>
+    <button id="picker-cancel" type="button">Cancel</button>
+    <button id="picker-add" class="primary" type="button" disabled>Add to song</button>
   </div>
 </dialog>
 
