@@ -8,12 +8,15 @@
    pattern in its library. null is silence for every grid. */
 const Song = (() => {
   const INSTRUMENTS = [
-    { name: "S-1 Grid", label: "S-1", url: "https://pzuzarte.github.io/s1-grid/" },
-    { name: "Protein Grid", label: "Protein", url: "https://pzuzarte.github.io/protein-grid/" },
-    { name: "Bass Station Grid", label: "Bass Station", url: "https://pzuzarte.github.io/bass-station-grid/" },
-    { name: "MPC Grid", label: "MPC", url: "https://pzuzarte.github.io/mpc-grid/", word: "Sequence" },
-    { name: "TD-3 Grid", label: "TD-3", url: "https://pzuzarte.github.io/td3-grid/", library: true },
+    // melodic: a section's transpose shifts its notes. presets: it can be sent a program
+    // change to pick a preset. channel: its MIDI channel, from 0, in an exported MIDI file.
+    { name: "S-1 Grid", label: "S-1", url: "https://pzuzarte.github.io/s1-grid/", melodic: true, presets: true, channel: 0 },
+    { name: "Protein Grid", label: "Protein", url: "https://pzuzarte.github.io/protein-grid/", melodic: true, presets: true, channel: 1 },
+    { name: "Bass Station Grid", label: "Bass Station", url: "https://pzuzarte.github.io/bass-station-grid/", melodic: true, presets: true, channel: 2 },
+    { name: "MPC Grid", label: "MPC", url: "https://pzuzarte.github.io/mpc-grid/", word: "Sequence", channel: 9 },
+    { name: "TD-3 Grid", label: "TD-3", url: "https://pzuzarte.github.io/td3-grid/", library: true, melodic: true, channel: 3 },
   ];
+  const BAR = 3840; // Pulses in a bar of 4/4, at 960 to a beat, as the grids count them.
   const GRID = "grid"; // TD-3 Grid's own pattern, rather than one from its library.
   const PATTERNS = 16;
   const BAR_CHOICES = [1, 2, 4, 8, 12, 16, 24, 32, 64];
@@ -31,12 +34,22 @@ const Song = (() => {
 
   // A grid missing from a saved section is silent in it, so older songs play as they did.
   // A new section starts every grid on its first pattern.
+  /* A section can also have its own tempo (bpm, or null for the song's), shift the notes
+     of the melodic grids (transpose, in semitones), play a fill pattern in its last bar
+     (fills, by grid, left out for none), and pick a preset on the grids that have them as
+     it starts (programs, by grid, 0 to 127, left out for none). */
   function section(fields = {}, { fill = true } = {}) {
     const patterns = {};
+    const fills = {};
+    const programs = {};
     for (const instrument of INSTRUMENTS) {
       const { name } = instrument;
       if (fields.patterns && name in fields.patterns) patterns[name] = cleanPattern(instrument, fields.patterns[name]);
       else patterns[name] = fill ? firstPattern(instrument) : null;
+      const fillPattern = fields.fills?.[name];
+      if (fillPattern === null || cleanPattern(instrument, fillPattern) !== null) fills[name] = fillPattern === null ? null : cleanPattern(instrument, fillPattern);
+      const program = fields.programs?.[name];
+      if (instrument.presets && Number.isInteger(program) && program >= 0 && program <= 127) programs[name] = program;
     }
     return {
       id: typeof fields.id === "string" ? fields.id : newId(),
@@ -44,6 +57,10 @@ const Song = (() => {
       bars: Number.isInteger(fields.bars) && fields.bars >= 1 && fields.bars <= 64 ? fields.bars : 4,
       patterns,
       loop: Boolean(fields.loop), // Repeats each time it's reached, until it's turned off.
+      bpm: Number.isFinite(fields.bpm) && fields.bpm >= 20 && fields.bpm <= 300 ? Math.round(fields.bpm * 10) / 10 : null,
+      transpose: Number.isInteger(fields.transpose) && fields.transpose >= -12 && fields.transpose <= 12 ? fields.transpose : 0,
+      fills,
+      programs,
     };
   }
 
@@ -164,15 +181,181 @@ const Song = (() => {
 
   // Which grids play what, from which bar. Each section starts its patterns from their
   // first step, so every grid lines up at the start of each section.
-  function plan(song) {
+  // A section with a fill plays it in its last bar, so it needs two bars or more.
+  // mutes are the grids muted with Song Grid's mute and solo buttons as it starts.
+  function plan(song, { mutes = [] } = {}) {
     const parts = {};
     for (const { name } of INSTRUMENTS) parts[name] = [];
+    const tempos = song.sections.some((item) => item.bpm !== null);
     let bar = 0;
     for (const item of song.sections) {
-      for (const { name } of INSTRUMENTS) parts[name].push({ bar, pattern: item.patterns[name] });
+      for (const instrument of INSTRUMENTS) {
+        const { name } = instrument;
+        const cue = { bar, pattern: item.patterns[name] };
+        if (tempos) cue.bpm = item.bpm ?? song.bpm;
+        if (instrument.melodic && item.transpose) cue.transpose = item.transpose;
+        if (name in item.programs) cue.program = item.programs[name];
+        parts[name].push(cue);
+        if (name in item.fills && item.bars > 1) {
+          const fill = { bar: bar + item.bars - 1, pattern: item.fills[name] };
+          if (instrument.melodic && item.transpose) fill.transpose = item.transpose;
+          parts[name].push(fill);
+        }
+      }
       bar += item.bars;
     }
-    return { bars: bar, loop: song.loop, parts, loops: loops(song) };
+    return { bars: bar, loop: song.loop, parts, loops: loops(song), mutes: [...mutes] };
+  }
+
+  // The tempo a song starts at.
+  const startBpm = (song) => song.sections[0]?.bpm ?? song.bpm;
+
+  // A song made from the sections played, in the order they played, such as from a
+  // performance with its jumps and loops. Each pass of a looped section is its own copy.
+  function fromSections(song, indexes, name) {
+    const sections = indexes.filter((index) => song.sections[index]).slice(0, MAX_SECTIONS)
+      .map((index) => ({ ...JSON.parse(JSON.stringify(song.sections[index])), id: undefined, loop: false }));
+    return cleanSong({ ...JSON.parse(JSON.stringify(song)), name, sections, loop: false });
+  }
+
+  /* Things in a song that won't play as it looks like they will: a pattern the arrangement
+     plays, as a section's pattern or fill, that isn't among the assets kept from its grid,
+     when any are kept from it. Each is { section, name, text }. */
+  function warnings(song, td3Library = null) {
+    const found = [];
+    song.sections.forEach((item, index) => {
+      for (const instrument of INSTRUMENTS) {
+        const { name } = instrument;
+        const kept = song.assets[name];
+        const check = (ref, what) => {
+          if (ref === null || ref === undefined) return;
+          if (instrument.library && ref !== GRID && td3Library && !td3Library.some((entry) => entry.id === ref)) {
+            found.push({ section: index, name, text: `${instrument.label} ${what} in "${item.name}" isn't in TD-3 Grid's library.` });
+          } else if (kept && (kept.patterns.length || kept.sound) && !kept.patterns.some((entry) => entry.ref === ref)) {
+            const label = instrument.library ? (ref === GRID ? "the grid pattern" : "a library pattern") : `${(instrument.word || "Pattern").toLowerCase()} ${ref + 1}`;
+            found.push({ section: index, name, text: `${instrument.label} plays ${label} ${what === "pattern" ? "" : "as its fill "}in "${item.name}", which isn't kept with the song.`.replace("  ", " ") });
+          }
+        };
+        check(item.patterns[name], "pattern");
+        if (item.bars > 1) check(item.fills[name], "fill");
+      }
+    });
+    return found;
+  }
+
+  /* ---------- A song as a MIDI file ---------- */
+
+  // A TD-3 Grid pattern's notes: 16ths, or triplets, with ties held and slides overlapping.
+  function td3Notes(data) {
+    const steps = Array.isArray(data?.steps) ? data.steps : [];
+    const length = Number.isInteger(data?.length) ? Math.max(1, Math.min(16, data.length)) : 16;
+    const step = data?.triplet ? 320 : 240;
+    const notes = [];
+    for (let index = 0; index < length; index += 1) {
+      const item = steps[index];
+      if (!item || item.kind !== "note") continue;
+      let span = 1;
+      while (index + span < length && steps[index + span]?.kind === "tie") span += 1;
+      const height = ((Number.isInteger(item.octave) ? item.octave : 0) + 1) * 12 + (Number.isInteger(item.note) ? item.note : 0);
+      notes.push({ note: 24 + height, time: index * step, length: span * step + (item.slide ? step / 4 : 0) - 1, velocity: item.accent ? 1 : 0.6 });
+    }
+    return { length: length * step, notes };
+  }
+
+  // A kept pattern's notes, and how long it is before it repeats, in pulses.
+  function patternNotes(instrument, data) {
+    if (instrument.library) return td3Notes(data);
+    const notes = (Array.isArray(data?.notes) ? data.notes : []).filter((item) => item
+      && [item.note, item.time, item.length].every(Number.isFinite) && item.length > 0);
+    const length = instrument.word ? data.lengthPulses : data.bars * BAR;
+    return { length: Number.isFinite(length) && length > 0 ? length : BAR, notes };
+  }
+
+  const vlq = (value) => {
+    const bytes = [value & 0x7F];
+    for (let rest = value >> 7; rest > 0; rest >>= 7) bytes.unshift((rest & 0x7F) | 0x80);
+    return bytes;
+  };
+  const text = (value) => [...value].map((char) => char.charCodeAt(0)).filter((code) => code >= 32 && code < 127);
+
+  function track(events) {
+    events.sort((a, b) => a.time - b.time || a.order - b.order);
+    const bytes = [];
+    let last = 0;
+    for (const { time, data } of events) {
+      bytes.push(...vlq(time - last), ...data);
+      last = time;
+    }
+    bytes.push(0x00, 0xFF, 0x2F, 0x00);
+    return [0x4D, 0x54, 0x72, 0x6B, (bytes.length >>> 24) & 0xFF, (bytes.length >>> 16) & 0xFF, (bytes.length >>> 8) & 0xFF, bytes.length & 0xFF, ...bytes];
+  }
+
+  /* The arrangement as a standard MIDI file, a track for each grid with notes, using the
+     patterns kept with the song. Each section plays once, with its fill, transpose, tempo
+     and preset. Gives { bytes, missing }, where missing lists what had no kept pattern. */
+  function toMidi(song) {
+    const PPQ = 960;
+    const tempo = (bpm) => {
+      const micro = Math.round(60000000 / bpm);
+      return [0xFF, 0x51, 0x03, (micro >> 16) & 0xFF, (micro >> 8) & 0xFF, micro & 0xFF];
+    };
+    const conductor = [
+      { time: 0, order: 0, data: [0xFF, 0x03, ...vlq(text(song.name || "Untitled").length), ...text(song.name || "Untitled")] },
+      { time: 0, order: 0, data: [0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08] },
+    ];
+    const tracks = [];
+    const missing = new Set();
+    let start = 0;
+    let bpm = null;
+    for (const item of song.sections) {
+      const itemBpm = item.bpm ?? song.bpm;
+      if (itemBpm !== bpm) conductor.push({ time: start, order: 0, data: tempo(itemBpm) });
+      bpm = itemBpm;
+      const nameBytes = text(item.name);
+      conductor.push({ time: start, order: 1, data: [0xFF, 0x06, ...vlq(nameBytes.length), ...nameBytes] });
+      start += item.bars * BAR;
+    }
+    for (const instrument of INSTRUMENTS) {
+      const { name, channel } = instrument;
+      const events = [];
+      const kept = song.assets[name]?.patterns || [];
+      let at = 0;
+      for (const item of song.sections) {
+        const end = at + item.bars * BAR;
+        const hasFill = item.bars > 1 && name in item.fills;
+        const shift = instrument.melodic ? item.transpose : 0;
+        if (name in item.programs) events.push({ time: at, order: 0, data: [0xC0 | channel, item.programs[name]] });
+        const place = (ref, from, to) => {
+          if (ref === null || ref === undefined) return;
+          const entry = kept.find((pattern) => pattern.ref === ref);
+          if (!entry) {
+            missing.add(`${instrument.label} ${instrument.library ? (ref === GRID ? "grid pattern" : "library pattern") : `${(instrument.word || "pattern").toLowerCase()} ${ref + 1}`}`);
+            return;
+          }
+          const { length, notes } = patternNotes(instrument, entry.data);
+          for (let base = from; base < to; base += length) {
+            for (const note of notes) {
+              const on = Math.round(base + note.time);
+              if (on >= to) continue;
+              const off = Math.min(to, Math.round(on + note.length));
+              const pitch = Math.max(0, Math.min(127, Math.round(note.note) + shift));
+              const velocity = Math.max(1, Math.min(127, Math.round((note.velocity ?? 0.8) * 127)));
+              events.push({ time: on, order: 2, data: [0x90 | channel, pitch, velocity] });
+              events.push({ time: Math.max(on + 1, off), order: 1, data: [0x80 | channel, pitch, 0] });
+            }
+          }
+        };
+        place(item.patterns[name], at, hasFill ? end - BAR : end);
+        if (hasFill) place(item.fills[name], end - BAR, end);
+        at = end;
+      }
+      if (!events.some((event) => (event.data[0] & 0xF0) === 0x90)) continue;
+      const label = text(instrument.label);
+      events.push({ time: 0, order: -1, data: [0xFF, 0x03, ...vlq(label.length), ...label] });
+      tracks.push(track(events));
+    }
+    const header = [0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, tracks.length + 1, (PPQ >> 8) & 0xFF, PPQ & 0xFF];
+    return { bytes: new Uint8Array([...header, ...track(conductor), ...tracks.flat()]), missing: [...missing] };
   }
 
   // Where each section starts and ends, in bars.
@@ -198,7 +381,10 @@ const Song = (() => {
     return null;
   }
 
-  return { BAR_CHOICES, GRID, INSTRUMENTS, MAX_SECTIONS, PATTERNS, addAssets, bounds, cleanAssets, cleanSong, loops, moveAsset, newSong, plan, section, sectionAt, totalBars, usesPattern };
+  return {
+    BAR_CHOICES, GRID, INSTRUMENTS, MAX_SECTIONS, PATTERNS, addAssets, bounds, cleanAssets, cleanSong, fromSections, loops, moveAsset, newSong,
+    plan, section, sectionAt, startBpm, toMidi, totalBars, usesPattern, warnings,
+  };
 })();
 
 if (typeof module !== "undefined") module.exports = Song;

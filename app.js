@@ -19,6 +19,17 @@ let peers = [];
 // is playing however the song has moved. played is the song as it was when Play was pressed.
 const playback = { on: false, anchorTime: 0, anchorPulse: 0, bpm: 120, timer: null, played: null, sim: null, queued: null };
 const MOVE_NOTICE_MS = 250; // Time for a move to reach every grid before its bar starts.
+const PREFS_KEY = "song-grid-prefs";
+const SETLIST_KEY = "song-grid-setlist";
+// The grids muted, and soloed, with the buttons beside each. Kept while the page is open.
+const mix = { muted: new Set(), solo: new Set() };
+// Choices kept in this browser: a count-in, and showing each section's extra settings.
+const prefs = { countIn: false, more: false };
+// Recording a take: whether it's on, and the sections played since it started, in order.
+const take = { on: false, sections: [] };
+// The set list, as saved song ids, and while one plays, which song it's on.
+let setList = [];
+let setPlaying = null;
 
 /* ---------- Saving in the browser ---------- */
 
@@ -46,7 +57,14 @@ function restore() {
   song = Song.cleanSong(saved.song);
   songId = typeof saved.songId === "string" ? saved.songId : null;
   songs = cleanSongs(readJson(SONGS_KEY, []));
+  const kept = readJson(PREFS_KEY, {});
+  prefs.countIn = Boolean(kept.countIn);
+  prefs.more = Boolean(kept.more);
+  const list = readJson(SETLIST_KEY, []);
+  setList = Array.isArray(list) ? list.filter((id) => typeof id === "string") : [];
 }
+
+const savePrefs = () => writeJson(PREFS_KEY, prefs);
 
 const newId = () => `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
@@ -103,6 +121,74 @@ function patternSelect(item, instrument) {
     else item.patterns[name] = instrument.library ? select.value : Number(select.value);
   });
   return select;
+}
+
+// The pattern a grid plays in a section's last bar: none, silence, or a pattern.
+function fillSelect(item, instrument) {
+  const { name } = instrument;
+  const select = document.createElement("select");
+  select.className = "fill-select";
+  const word = instrument.word || "Pattern";
+  select.append(new Option("No fill", "none"), new Option("Fill: Off", "off"));
+  if (instrument.library) {
+    select.append(new Option("Fill: Grid pattern", Song.GRID), ...td3Library().map((entry) => new Option(`Fill: ${entry.name}`, entry.id)));
+  } else {
+    select.append(...Array.from({ length: Song.PATTERNS }, (_, index) => new Option(`Fill: ${word} ${index + 1}`, String(index))));
+  }
+  const value = item.fills[name];
+  select.value = !(name in item.fills) ? "none" : value === null ? "off" : String(value);
+  if (select.value === "" && value) {
+    select.append(new Option("Fill: (not in the library)", value));
+    select.value = value;
+  }
+  select.disabled = item.bars < 2;
+  select.title = item.bars < 2 ? "A fill plays in the section's last bar, so the section needs two bars or more" : "What this grid plays in the section's last bar, in place of its pattern";
+  select.setAttribute("aria-label", `${name} fill in ${item.name}`);
+  select.onchange = () => change(() => {
+    if (select.value === "none") delete item.fills[name];
+    else if (select.value === "off") item.fills[name] = null;
+    else item.fills[name] = instrument.library ? select.value : Number(select.value);
+  });
+  return select;
+}
+
+// The preset a grid is sent as the section starts, by program change, numbered from 1.
+function presetInput(item, instrument) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "1";
+  input.max = "128";
+  input.className = "preset-input";
+  input.placeholder = "Preset";
+  const value = item.programs[instrument.name];
+  input.value = Number.isInteger(value) ? String(value + 1) : "";
+  input.title = "Sends a program change to pick this preset as the section starts. Leave it empty to keep the sound as it is.";
+  input.setAttribute("aria-label", `${instrument.name} preset in ${item.name}`);
+  input.onchange = () => change(() => {
+    const number = Number(input.value);
+    if (input.value === "" || !Number.isInteger(number) || number < 1 || number > 128) delete item.programs[instrument.name];
+    else item.programs[instrument.name] = number - 1;
+  });
+  return input;
+}
+
+const usesExtras = (target) => target.sections.some((item) => item.bpm !== null || item.transpose
+  || Object.keys(item.fills).length || Object.keys(item.programs).length);
+
+// The grids muted as things stand: with any soloed, every grid but those.
+const effectiveMutes = () => (mix.solo.size
+  ? Song.INSTRUMENTS.map((item) => item.name).filter((name) => !mix.solo.has(name))
+  : [...mix.muted]);
+
+function toggleMix(kind, name) {
+  const list = mix[kind];
+  if (list.has(name)) list.delete(name);
+  else list.add(name);
+  if (playback.on) {
+    sendMove({ atBar: nextSafeBar(), mutes: effectiveMutes() });
+    setStatus("The mix changes on the next bar.");
+  }
+  render();
 }
 
 // An infinity sign with an arrow, for Loop, and two chevrons, for Up next.
@@ -169,6 +255,7 @@ function render() {
 
   const table = $("table");
   const rows = [];
+  const warned = Song.warnings(song, td3Library());
   const count = song.sections.length;
 
   const tools = document.createElement("tr");
@@ -240,13 +327,64 @@ function render() {
   });
   rows.push(tools, names, bars, play);
 
+  // Each section's own tempo and transpose, shown with its fills and presets.
+  const more = prefs.more || usesExtras(song);
+  $("more-toggle").setAttribute("aria-pressed", String(more));
+  // While a section uses them they stay shown.
+  $("more-toggle").disabled = usesExtras(song);
+  if (more) {
+    const tempo = document.createElement("tr");
+    tempo.append(Object.assign(document.createElement("th"), { textContent: "Tempo" }));
+    const shift = document.createElement("tr");
+    shift.append(Object.assign(document.createElement("th"), { textContent: "Transpose" }));
+    song.sections.forEach((item, index) => {
+      const cell = document.createElement("td");
+      cell.dataset.section = String(index);
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "20";
+      input.max = "300";
+      input.step = "0.1";
+      input.placeholder = String(song.bpm);
+      input.value = item.bpm === null ? "" : String(item.bpm);
+      input.title = "This section's tempo. Leave it empty to play at the song's BPM.";
+      input.setAttribute("aria-label", `${item.name} tempo`);
+      input.onchange = () => change(() => {
+        const bpm = Number(input.value);
+        item.bpm = input.value === "" || !(bpm >= 20 && bpm <= 300) ? null : Math.round(bpm * 10) / 10;
+      });
+      cell.append(input);
+      tempo.append(cell);
+      const shiftCell = document.createElement("td");
+      shiftCell.dataset.section = String(index);
+      const select = document.createElement("select");
+      for (let value = -12; value <= 12; value += 1) select.append(new Option(value === 0 ? "None" : `${value > 0 ? "+" : ""}${value} st`, String(value)));
+      select.value = String(item.transpose);
+      select.title = "Shifts the notes of every grid but MPC Grid in this section, by semitones (st)";
+      select.setAttribute("aria-label", `${item.name} transpose`);
+      select.onchange = () => change(() => { item.transpose = Number(select.value); });
+      shiftCell.append(select);
+      shift.append(shiftCell);
+    });
+    rows.push(tempo, shift);
+  }
+
   for (const instrument of Song.INSTRUMENTS) {
     const row = document.createElement("tr");
     const open = peers.includes(instrument.name);
     row.classList.toggle("closed", !open);
+    row.classList.toggle("silenced", effectiveMutes().includes(instrument.name));
     const label = document.createElement("th");
     label.className = "instrument";
-    label.textContent = instrument.label;
+    const mute = toolButton("M", mix.muted.has(instrument.name) ? `Unmute ${instrument.name}` : `Mute ${instrument.name}`, () => toggleMix("muted", instrument.name));
+    mute.className = "mix-button";
+    mute.setAttribute("aria-pressed", String(mix.muted.has(instrument.name)));
+    const solo = toolButton("S", mix.solo.has(instrument.name) ? `Stop soloing ${instrument.name}` : `Solo ${instrument.name}: mute every other grid`, () => toggleMix("solo", instrument.name));
+    solo.className = "mix-button solo";
+    solo.setAttribute("aria-pressed", String(mix.solo.has(instrument.name)));
+    const top = Object.assign(document.createElement("span"), { className: "instrument-top" });
+    top.append(Object.assign(document.createElement("span"), { textContent: instrument.label }), mute, solo);
+    label.append(top);
     const note = document.createElement("small");
     if (open) {
       note.textContent = "Linked";
@@ -261,18 +399,95 @@ function render() {
     }
     label.append(note);
     row.append(label);
+    const flagged = new Set(warned.filter((entry) => entry.name === instrument.name).map((entry) => entry.section));
     song.sections.forEach((item, index) => {
       const cell = document.createElement("td");
       cell.dataset.section = String(index);
+      cell.classList.toggle("warn", flagged.has(index));
       cell.append(patternSelect(item, instrument));
       row.append(cell);
     });
     rows.push(row);
+    if (more) {
+      // Its fill, and preset where it has them, under its pattern.
+      const extra = document.createElement("tr");
+      extra.className = "extra-row";
+      extra.classList.toggle("closed", !open);
+      extra.append(Object.assign(document.createElement("th"), { textContent: instrument.presets ? "Fill, preset" : "Fill" }));
+      song.sections.forEach((item, index) => {
+        const cell = document.createElement("td");
+        cell.dataset.section = String(index);
+        const inner = Object.assign(document.createElement("div"), { className: "extra-cell" });
+        inner.append(fillSelect(item, instrument));
+        if (instrument.presets) inner.append(presetInput(item, instrument));
+        cell.append(inner);
+        extra.append(cell);
+      });
+      rows.push(extra);
+    }
   }
   table.replaceChildren(...rows);
+  $("warnings").replaceChildren(...warned.map((entry) => Object.assign(document.createElement("li"), { textContent: entry.text })));
+  $("warnings").hidden = !warned.length;
+  renderTimeline();
   renderPlaying();
   renderAssets();
   renderSongs();
+}
+
+/* ---------- Timeline ---------- */
+
+// Each section as a block as wide as its bars. Drag one to move it, or click it to go to it.
+let dragging = null;
+
+function moveSectionTo(from, to) {
+  if (from === to) return;
+  change((target) => {
+    const [item] = target.sections.splice(from, 1);
+    target.sections.splice(to, 0, item);
+  });
+}
+
+function renderTimeline() {
+  const queued = playback.queued?.index;
+  $("timeline").replaceChildren(...song.sections.map((item, index) => {
+    const block = document.createElement("button");
+    block.type = "button";
+    block.className = "block";
+    block.style.flexGrow = String(item.bars);
+    block.dataset.section = String(index);
+    block.draggable = true;
+    block.classList.toggle("looping", item.loop);
+    block.classList.toggle("queued", queued === index);
+    block.title = `${item.name}: ${item.bars} bar${item.bars === 1 ? "" : "s"}${item.loop ? ", looping" : ""}. Drag to move it. Click to go to it.`;
+    block.append(Object.assign(document.createElement("span"), { className: "block-fill" }),
+      Object.assign(document.createElement("span"), { className: "block-name", textContent: item.name }),
+      Object.assign(document.createElement("small"), { textContent: `${item.bars}${item.loop ? " \u221e" : ""}` }));
+    block.onclick = () => {
+      const cell = document.querySelector(`#table td[data-section="${index}"] input`);
+      cell?.scrollIntoView({ block: "nearest", inline: "center" });
+      cell?.focus();
+    };
+    block.ondragstart = (event) => {
+      dragging = index;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+    };
+    block.ondragover = (event) => {
+      if (dragging === null) return;
+      event.preventDefault();
+      block.classList.add("drop");
+    };
+    block.ondragleave = () => block.classList.remove("drop");
+    block.ondrop = (event) => {
+      event.preventDefault();
+      const from = dragging;
+      dragging = null;
+      if (from !== null) moveSectionTo(from, index);
+    };
+    block.ondragend = () => { dragging = null; };
+    return block;
+  }));
 }
 
 /* ---------- Playing ---------- */
@@ -326,6 +541,11 @@ function renderProgress() {
       text = `${at.bar + 1}/${bars}`;
     }
   }
+  document.querySelectorAll("#timeline .block").forEach((block) => {
+    const here = index !== null && Number(block.dataset.section) === index;
+    block.classList.toggle("playing", here);
+    block.querySelector(".block-fill").style.width = `${here ? done * 100 : 0}%`;
+  });
   document.querySelectorAll(".section-play").forEach((cell) => {
     const here = index !== null && Number(cell.dataset.section) === index;
     cell.querySelector(".fill").style.width = `${here ? done * 100 : 0}%`;
@@ -340,16 +560,27 @@ function animate() {
   requestAnimationFrame(animate);
 }
 
+// When a bar of playback starts, in performance.now() time, at the tempo playing.
+const timeOfBar = (played) => playback.anchorTime + (played * BAR_PULSES - playback.anchorPulse) * msPerPulse();
+
 function tick() {
   if (!playback.on) return;
-  const played = Math.floor(pulseAt(performance.now()) / BAR_PULSES);
-  // The grids stop themselves at the end, so this page only catches up.
-  while (playback.sim.played < played) {
+  const now = performance.now();
+  // The grids stop themselves at the end, so this page only catches up, a bar at a time,
+  // following each section's tempo from the bar it starts on, as the grids do.
+  while (playback.sim.played < Math.floor(pulseAt(now) / BAR_PULSES)) {
+    const start = timeOfBar(playback.sim.played + 1);
     if (!Sync.songNextBar(playback.sim)) {
-      stopPlaying();
-      setStatus("The song has ended.");
+      endOfSong();
       return;
     }
+    const bpm = playback.tempos.get(playback.sim.bar);
+    if (bpm && bpm !== playback.bpm) {
+      retime(bpm, start);
+      $("bpm").value = String(bpm);
+    }
+    const index = playback.starts.get(playback.sim.bar);
+    if (take.on && index !== undefined) take.sections.push(index);
   }
   if (playback.queued && playback.sim.played >= playback.queued.atBar) {
     playback.queued = null;
@@ -456,45 +687,127 @@ function queueSection(index) {
   setStatus(`Up next: "${target.sections[index].name}", when "${target.sections[playing.index].name}" finishes.`);
 }
 
+/* ---------- Count-in ---------- */
+
+let audio = null;
+
+// A click for each beat of the bar before the song starts, as this page makes no other sound.
+function countIn(at, bpm) {
+  try {
+    audio ||= new AudioContext();
+    audio.resume();
+  } catch {
+    return;
+  }
+  const beat = 60000 / bpm;
+  for (let index = 0; index < 4; index += 1) {
+    const when = audio.currentTime + (at - 4 * beat + index * beat - performance.now()) / 1000;
+    if (when < audio.currentTime) continue;
+    const tone = audio.createOscillator();
+    const level = audio.createGain();
+    tone.frequency.value = index === 0 ? 1500 : 1000;
+    level.gain.setValueAtTime(0.4, when);
+    level.gain.exponentialRampToValueAtTime(0.001, when + 0.06);
+    tone.connect(level).connect(audio.destination);
+    tone.start(when);
+    tone.stop(when + 0.07);
+  }
+}
+
 function startPlaying() {
   if (!peers.some((name) => Song.INSTRUMENTS.some((item) => item.name === name))) {
     setStatus("Open the grids in this browser, with Sync ticked, to play the song.", true);
+    setPlaying = null;
+    renderSetList();
     return;
   }
-  const plan = Song.plan(song);
+  const plan = Song.plan(song, { mutes: effectiveMutes() });
+  const bpm = Song.startBpm(song);
   link.announceSong(plan);
-  const at = link.announcePlay(song.bpm);
+  const wait = prefs.countIn ? 4 * (60000 / bpm) : 0;
+  const at = link.announcePlay(bpm, wait);
   if (at === null) {
     setStatus("Couldn't reach the grids. Reload this page and try again.", true);
     return;
   }
+  if (wait) countIn(at, bpm);
+  // Where each section starts, and its tempo when sections have their own.
+  const bounds = Song.bounds(song);
+  const starts = new Map(bounds.map((range, index) => [range.start, index]));
+  const tempos = new Map(song.sections.some((item) => item.bpm !== null)
+    ? bounds.map((range, index) => [range.start, song.sections[index].bpm ?? song.bpm]) : []);
   Object.assign(playback, {
-    on: true, anchorTime: at, anchorPulse: 0, bpm: song.bpm, queued: null,
+    on: true, anchorTime: at, anchorPulse: 0, bpm, queued: null, starts, tempos,
     played: JSON.parse(JSON.stringify(song)), sim: Sync.songStart({ bars: plan.bars, loop: plan.loop, loops: plan.loops }),
   });
+  if (take.on) take.sections = [0];
   clearInterval(playback.timer);
   playback.timer = setInterval(tick, 100);
   render();
   requestAnimationFrame(animate);
   const playing = Song.INSTRUMENTS.filter((item) => peers.includes(item.name)).map((item) => item.label);
-  setStatus(`Playing "${song.name || "Untitled"}" on ${playing.join(", ")}.`);
+  const set = setPlaying !== null ? `, song ${setPlaying + 1} of ${setList.length} in the set` : "";
+  const looped = setPlaying !== null && song.loop ? " It has Loop on, so the set won't go on past it until you turn Loop off." : "";
+  setStatus(`${wait ? "Counting in, then playing" : "Playing"} "${song.name || "Untitled"}"${set} on ${playing.join(", ")}.${looped}`);
 }
 
+// Stops playing. A take being recorded is saved as a song.
 function stopPlaying() {
   playback.on = false;
   playback.queued = null;
   clearInterval(playback.timer);
   $("bpm").value = String(song.bpm);
+  const kept = saveTake();
   render();
+  return kept;
+}
+
+function endOfSong() {
+  const kept = stopPlaying();
+  if (setPlaying !== null) {
+    playSetSong(setPlaying + 1);
+    return;
+  }
+  setStatus(`The song has ended.${kept ? ` ${kept}` : ""}`);
 }
 
 function togglePlay() {
   if (playback.on) {
     link.announceStop();
-    stopPlaying();
-    setStatus("Stopped.");
+    setPlaying = null;
+    renderSetList();
+    const kept = stopPlaying();
+    setStatus(`Stopped.${kept ? ` ${kept}` : ""}`);
   } else {
     startPlaying();
+  }
+}
+
+/* ---------- Recording a take ---------- */
+
+// Saves the sections played since recording started as a new song. Gives what it did.
+function saveTake() {
+  const played = take.sections;
+  take.sections = [];
+  if (!played.length || !playback.played) return "";
+  const base = playback.played.name || "Untitled";
+  const count = songs.filter((item) => item.song.name.startsWith(`${base} take`)).length + 1;
+  const kept = Song.fromSections(playback.played, played, `${base} take ${count}`.slice(0, 40));
+  songs.unshift({ id: newId(), song: kept, saved: new Date().toISOString() });
+  writeJson(SONGS_KEY, songs);
+  renderSongs();
+  return `Saved the take as "${kept.name}" in Saved songs, with ${kept.sections.length} section${kept.sections.length === 1 ? "" : "s"}.`;
+}
+
+function toggleTake() {
+  take.on = !take.on;
+  $("record").setAttribute("aria-pressed", String(take.on));
+  if (take.on) {
+    take.sections = [];
+    setStatus(playback.on ? "Recording a take from the next section." : "Recording a take when you press Play. Every section that plays, with your jumps and loops, is kept in order.");
+  } else {
+    const kept = playback.on ? saveTake() : "";
+    setStatus(kept || "Stopped recording.");
   }
 }
 
@@ -589,6 +902,7 @@ const joinNames = (names) => (names.length > 1 ? `${names.slice(0, -1).join(", "
 
 // Puts a song's assets back into grids. only, for one grid, sends just those assets.
 function loadInto(names, only = null) {
+  $("load-offer").hidden = true;
   const targets = names.filter((name) => peers.includes(name) && hasAssets(name));
   if (!targets.length) {
     setStatus(names.some(hasAssets) ? "Open the grids in this browser, with Sync ticked, to put the assets back into them." : "This song has no assets to put back. Collect them first.", true);
@@ -877,19 +1191,128 @@ function renderSongs() {
       writeJson(SONGS_KEY, songs);
       save();
       renderSongs();
+      renderSetList();
     });
-    row.append(open, remove);
+    const add = toolButton("+", "Add this song to the set list", () => addToSet(item));
+    add.className = "set-add";
+    row.append(open, add, remove);
     return row;
   }));
 }
 
-function openSong(item) {
+function openSong(item, { offer = true } = {}) {
   if (playback.on) togglePlay();
   song = Song.cleanSong(JSON.parse(JSON.stringify(item.song)));
   songId = item.id;
   save();
   render();
-  setStatus(`Opened "${song.name || "Untitled"}".`);
+  // Offers to put the song's patterns and sounds into the grids, so they match it.
+  const assets = Song.INSTRUMENTS.some(({ name }) => hasAssets(name));
+  $("load-offer").hidden = !offer || !assets;
+  setStatus(`Opened "${song.name || "Untitled"}".${offer && assets ? " It has patterns and sounds kept with it: Load all puts them into the grids." : ""}`);
+}
+
+/* ---------- Set list ---------- */
+
+const saveSetList = () => writeJson(SETLIST_KEY, setList);
+const songById = (id) => songs.find((item) => item.id === id);
+
+function renderSetList() {
+  $("set-empty").hidden = setList.length > 0;
+  $("play-set").textContent = setPlaying !== null ? "Stop set" : "Play set";
+  $("play-set").disabled = !setList.length && setPlaying === null;
+  $("set-list").replaceChildren(...setList.map((id, index) => {
+    const item = songById(id);
+    const row = document.createElement("li");
+    row.classList.toggle("current", setPlaying === index);
+    row.append(Object.assign(document.createElement("span"), { className: "set-number", textContent: `${index + 1}.` }),
+      Object.assign(document.createElement("span"), { className: "set-name", textContent: item ? item.song.name || "Untitled" : "(deleted)" }));
+    if (item?.song.loop) row.append(Object.assign(document.createElement("small"), { className: "muted", textContent: "Loops", title: "This song has Loop on, so the set won't go on past it" }));
+    row.append(
+      toolButton("\u2191", "Play it earlier", () => moveInSet(index, -1), index === 0),
+      toolButton("\u2193", "Play it later", () => moveInSet(index, 1), index === setList.length - 1),
+      toolButton("\u00d7", "Take it out of the set list", () => removeFromSet(index)),
+    );
+    return row;
+  }));
+}
+
+function addToSet(item) {
+  setList.push(item.id);
+  saveSetList();
+  renderSetList();
+  setStatus(`Added "${item.song.name || "Untitled"}" to the set list, as song ${setList.length}.`);
+}
+
+function moveInSet(index, by) {
+  const [id] = setList.splice(index, 1);
+  setList.splice(index + by, 0, id);
+  if (setPlaying === index) setPlaying += by;
+  else if (setPlaying === index + by) setPlaying -= by;
+  saveSetList();
+  renderSetList();
+}
+
+function removeFromSet(index) {
+  setList.splice(index, 1);
+  if (setPlaying !== null && index <= setPlaying) setPlaying = index === setPlaying ? null : setPlaying - 1;
+  saveSetList();
+  renderSetList();
+}
+
+function toggleSet() {
+  if (setPlaying !== null) {
+    if (playback.on) togglePlay();
+    setPlaying = null;
+    renderSetList();
+    setStatus("Stopped the set.");
+    return;
+  }
+  playSetSong(0);
+}
+
+// Opens the set's next song, puts its assets into the grids if it has any, and plays it.
+function playSetSong(index) {
+  let at = index;
+  while (at < setList.length && !songById(setList[at])) at += 1;
+  if (at >= setList.length) {
+    setPlaying = null;
+    renderSetList();
+    setStatus(index === 0 ? "The set list has no songs to play." : "The set has ended.");
+    return;
+  }
+  const item = songById(setList[at]);
+  setPlaying = at;
+  openSong(item, { offer: false });
+  setPlaying = at;
+  renderSetList();
+  const loading = Song.INSTRUMENTS.some(({ name }) => peers.includes(name) && hasAssets(name));
+  if (!loading) {
+    startPlaying();
+    return;
+  }
+  loadInto(Song.INSTRUMENTS.map(({ name }) => name));
+  // Gives the grids time to take the patterns in before it starts.
+  setTimeout(() => { if (setPlaying === at && !playback.on) startPlaying(); }, 1500);
+}
+
+/* ---------- Exporting MIDI ---------- */
+
+function exportMidi() {
+  const { bytes, missing } = Song.toMidi(song);
+  const tracks = bytes[11] - 1;
+  if (!tracks) {
+    setStatus("There are no notes to export. Keep the song's patterns with it first, in Assets, as the file is made from them.", true);
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([bytes], { type: "audio/midi" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${(song.name || "song").replace(/[^\w .-]+/g, "").trim() || "song"}.mid`;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const gaps = missing.length ? ` These aren't kept with the song, so they're silent in it: ${missing.join(", ")}.` : "";
+  setStatus(`Downloaded ${anchor.download}, with ${tracks} track${tracks === 1 ? "" : "s"}. Each section plays once.${gaps}`, Boolean(missing.length));
 }
 
 function saveSong(asNew) {
@@ -973,6 +1396,21 @@ function bind() {
     }
   };
   $("loop").onchange = () => change(() => { song.loop = $("loop").checked; });
+  $("record").onclick = toggleTake;
+  $("count-in").checked = prefs.countIn;
+  $("count-in").onchange = () => {
+    prefs.countIn = $("count-in").checked;
+    savePrefs();
+  };
+  $("more-toggle").onclick = () => {
+    prefs.more = !prefs.more;
+    savePrefs();
+    render();
+  };
+  $("export-midi").onclick = exportMidi;
+  $("play-set").onclick = toggleSet;
+  $("offer-load").onclick = () => loadInto(Song.INSTRUMENTS.map((item) => item.name));
+  $("offer-dismiss").onclick = () => { $("load-offer").hidden = true; };
   $("section-back").onclick = () => skipSection(-1);
   $("section-next").onclick = () => skipSection(1);
   $("add-section").onclick = () => copySection(song.sections.length - 1);
@@ -1009,11 +1447,26 @@ function bind() {
   $("help-close").onclick = () => $("help").close();
   document.addEventListener("keydown", (event) => {
     if (event.target.closest("input, select, textarea") || document.querySelector("dialog[open]")) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === " ") {
       event.preventDefault();
       togglePlay();
     } else if (event.key === "?") {
       $("help").showModal();
+    } else if (/^[1-9]$/.test(event.key) && playback.on) {
+      // Up next by number, as the sections are counted left to right.
+      const index = Number(event.key) - 1;
+      if (index < playback.played.sections.length) queueSection(index);
+    } else if (event.key.toLowerCase() === "l" && playback.on) {
+      const at = Song.sectionAt(playback.played, playback.sim.bar);
+      const index = at ? song.sections.findIndex((item) => item.id === playback.played.sections[at.index].id) : -1;
+      if (index >= 0) toggleLoop(index);
+    } else if (event.key === "ArrowLeft" && playback.on) {
+      skipSection(-1);
+    } else if (event.key === "ArrowRight" && playback.on) {
+      skipSection(1);
+    } else if (event.key.toLowerCase() === "r") {
+      toggleTake();
     }
   });
   window.addEventListener("pagehide", () => { if (playback.on) link.announceStop(); });
@@ -1023,4 +1476,5 @@ restore();
 setTheme(document.documentElement.dataset.theme === "light");
 bind();
 render();
+renderSetList();
 setStatus("Open the grids in this browser with Sync ticked, choose a pattern for each section, then press Play.");

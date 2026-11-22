@@ -31,7 +31,7 @@ test("the plan cues each grid at the start of every section", () => {
   assert.deepEqual(plan.parts["Protein Grid"], [{ bar: 0, pattern: null }, { bar: 4, pattern: 2 }, { bar: 12, pattern: null }]);
   assert.deepEqual(plan.parts["Bass Station Grid"].map((cue) => cue.pattern), [null, 0, 15]);
   // It reads back through sync.js the way each grid gets it.
-  assert.deepEqual(Sync.songPart(plan, "S-1 Grid"), { bars: 14, loop: true, cues: [{ bar: 0, pattern: 0 }, { bar: 4, pattern: 1 }, { bar: 12, pattern: 0 }], loops: [] });
+  assert.deepEqual(Sync.songPart(plan, "S-1 Grid"), { name: "S-1 Grid", bars: 14, loop: true, cues: [{ bar: 0, pattern: 0 }, { bar: 4, pattern: 1 }, { bar: 12, pattern: 0 }], loops: [], mutes: [] });
 });
 
 test("the section and bar playing at any point", () => {
@@ -142,4 +142,99 @@ test("patterns picked from a library go where the arrangement needs them", () =>
   // TD-3 Grid's library patterns keep their ids as refs.
   Song.addAssets(song, "TD-3 Grid", { patterns: [{ ...pattern("td3:p1", "p1") }] });
   assert.deepEqual(song.assets["TD-3 Grid"].patterns.map((item) => item.ref), ["p1"]);
+});
+
+test("a section's tempo, transpose, fill and preset reach the grids in their cues", () => {
+  const song = Song.cleanSong({ bpm: 120, sections: [
+    { name: "A", bars: 4, patterns: { "S-1 Grid": 0, "MPC Grid": 1, "TD-3 Grid": "grid" }, transpose: 3, fills: { "S-1 Grid": 5, "MPC Grid": 2 }, programs: { "S-1 Grid": 9, "MPC Grid": 4 } },
+    { name: "B", bars: 1, patterns: { "S-1 Grid": 1 }, bpm: 128, fills: { "S-1 Grid": 7 } },
+  ] });
+  assert.equal(song.sections[0].bpm, null);
+  assert.deepEqual(song.sections[0].programs, { "S-1 Grid": 9 }, "the MPC has no presets to pick");
+  const plan = Song.plan(song, { mutes: ["MPC Grid"] });
+  assert.deepEqual(plan.parts["S-1 Grid"], [
+    { bar: 0, pattern: 0, bpm: 120, transpose: 3, program: 9 },
+    { bar: 3, pattern: 5, transpose: 3 },
+    { bar: 4, pattern: 1, bpm: 128 },
+  ], "a one-bar section has no room for a fill");
+  assert.deepEqual(plan.parts["MPC Grid"], [{ bar: 0, pattern: 1, bpm: 120 }, { bar: 3, pattern: 2 }, { bar: 4, pattern: null, bpm: 128 }], "drums aren't transposed");
+  assert.deepEqual(plan.parts["TD-3 Grid"][0], { bar: 0, pattern: "grid", bpm: 120, transpose: 3 });
+  assert.equal(Song.startBpm(song), 120);
+  // Each grid reads its part, and whether it's muted, through sync.js.
+  const mpc = Sync.songStart(Sync.songPart(plan, "MPC Grid"));
+  assert.equal(Sync.songSilenced(mpc), true);
+  const s1 = Sync.songStart(Sync.songPart(plan, "S-1 Grid"));
+  assert.equal(Sync.songSilenced(s1), false);
+  s1.moves.push(Sync.songMove({ atBar: 1, mutes: ["S-1 Grid"] }, plan.bars));
+  Sync.songNextBar(s1);
+  assert.equal(Sync.songSilenced(s1), true);
+});
+
+test("warnings point out patterns the song plays but doesn't keep", () => {
+  const song = Song.cleanSong({
+    sections: [{ name: "Verse", bars: 4, patterns: { "S-1 Grid": 2, "Protein Grid": 0, "TD-3 Grid": "gone" }, fills: { "S-1 Grid": 3 } }],
+    assets: { "S-1 Grid": { patterns: [{ id: "slot:2", ref: 2, label: "Pattern 3", data: { bars: 1, notes: [] } }] } },
+  });
+  const texts = Song.warnings(song, [{ id: "here", name: "Here" }]).map((item) => item.text);
+  assert.deepEqual(texts, [
+    'S-1 plays pattern 4 as its fill in "Verse", which isn\'t kept with the song.',
+    'TD-3 pattern in "Verse" isn\'t in TD-3 Grid\'s library.',
+  ]);
+});
+
+test("a song exports as a MIDI file, with a track for each grid", () => {
+  const song = Song.cleanSong({
+    name: "Demo", bpm: 120,
+    sections: [
+      { name: "A", bars: 2, patterns: { "S-1 Grid": 0, "TD-3 Grid": "grid", "MPC Grid": 4 }, transpose: 2 },
+      { name: "B", bars: 1, patterns: { "S-1 Grid": 0 }, bpm: 90 },
+    ],
+    assets: {
+      "S-1 Grid": { patterns: [{ id: "slot:0", ref: 0, label: "Pattern 1", data: { bars: 1, notes: [{ note: 60, time: 0, length: 960, velocity: 1 }] } }] },
+      "TD-3 Grid": { patterns: [{ id: "td3:grid", ref: "grid", label: "Grid", data: { length: 2, triplet: false, steps: [{ kind: "note", note: 0, octave: 0 }, { kind: "tie" }] } }] },
+    },
+  });
+  const { bytes, missing } = Song.toMidi(song);
+  assert.deepEqual(missing, ["MPC sequence 5"]);
+  const ascii = (from, count) => String.fromCharCode(...bytes.slice(from, from + count));
+  assert.equal(ascii(0, 4), "MThd");
+  assert.equal(bytes[11], 3, "a conductor track, then S-1 and TD-3");
+  // Read every note-on back, with its time, from each track.
+  const tracks = [];
+  let at = 14;
+  while (at < bytes.length) {
+    assert.equal(ascii(at, 4), "MTrk");
+    const size = (bytes[at + 4] << 24) | (bytes[at + 5] << 16) | (bytes[at + 6] << 8) | bytes[at + 7];
+    const data = bytes.slice(at + 8, at + 8 + size);
+    const ons = [];
+    const tempos = [];
+    let i = 0;
+    let time = 0;
+    while (i < data.length) {
+      let delta = 0;
+      do { delta = (delta << 7) | (data[i] & 0x7F); } while (data[i++] & 0x80);
+      time += delta;
+      const status = data[i];
+      if (status === 0xFF) {
+        if (data[i + 1] === 0x51) tempos.push([time, Math.round(60000000 / ((data[i + 3] << 16) | (data[i + 4] << 8) | data[i + 5]))]);
+        i += 3 + data[i + 2];
+      } else {
+        if ((status & 0xF0) === 0x90) ons.push([time, data[i + 1]]);
+        i += (status & 0xF0) === 0xC0 ? 2 : 3;
+      }
+    }
+    tracks.push({ ons, tempos });
+    at += 8 + size;
+  }
+  assert.deepEqual(tracks[0].tempos, [[0, 120], [7680, 90]]);
+  assert.deepEqual(tracks[1].ons, [[0, 62], [3840, 62], [7680, 60]], "S-1 repeats its bar, transposed in A");
+  assert.deepEqual(tracks[2].ons, [[0, 38], [480, 38], [960, 38], [1440, 38], [1920, 38], [2400, 38], [2880, 38], [3360, 38], [3840, 38], [4320, 38], [4800, 38], [5280, 38], [5760, 38], [6240, 38], [6720, 38], [7200, 38]], "TD-3's two-step pattern repeats through A");
+});
+
+test("a performance becomes a song of the sections as they played", () => {
+  const song = Song.cleanSong({ name: "Live", sections: [{ name: "A", bars: 2 }, { name: "B", bars: 4, loop: true }] });
+  const take = Song.fromSections(song, [0, 1, 1, 0, 7], "Live take");
+  assert.equal(take.name, "Live take");
+  assert.deepEqual(take.sections.map((item) => [item.name, item.loop]), [["A", false], ["B", false], ["B", false], ["A", false]]);
+  assert.equal(new Set(take.sections.map((item) => item.id)).size, 4);
 });

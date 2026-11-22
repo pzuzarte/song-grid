@@ -22,11 +22,15 @@
     <input id="song-name" type="text" maxlength="40" placeholder="Untitled" spellcheck="false">
   </label>
   <button id="play" class="primary" type="button" title="Starts the open grids playing the song (Space)">Play</button>
+  <button id="record" class="record" type="button" aria-pressed="false" title="Records a take: every section that plays, with your jumps and loops, saved in order as a new song when it stops (R)">Rec</button>
   <label>BPM
     <input id="bpm" type="number" min="20" max="300" step="0.1" value="120">
   </label>
   <label class="check" title="Starts the song again after its last section">
     <input id="loop" type="checkbox"> Loop
+  </label>
+  <label class="check" title="Clicks for a bar before the song starts">
+    <input id="count-in" type="checkbox"> Count-in
   </label>
   <span class="divider" aria-hidden="true"></span>
   <button id="section-back" type="button" title="Jump to the start of the section before, on the next bar" disabled>&#9664; Section</button>
@@ -57,11 +61,15 @@
       <h2 id="arrangement-title">Arrangement</h2>
       <span id="total" class="muted"></span>
       <div class="spacer"></div>
+      <button id="more-toggle" class="toggle" type="button" aria-pressed="false" title="Shows each section's tempo and transpose, and each grid's fill and preset. While a section uses them they stay shown.">Tempo, fills, presets</button>
+      <button id="export-midi" type="button" title="Downloads the arrangement as a MIDI file, a track for each grid, made from the patterns kept with the song">Export MIDI</button>
       <button id="add-section" type="button" title="Adds a section at the end, a copy of the last one">Add section</button>
     </div>
+    <div id="timeline" class="timeline" aria-label="Sections, as wide as their bars. Drag one to move it."></div>
     <div class="table-wrap">
       <table id="table" class="song-table"></table>
     </div>
+    <ul id="warnings" class="warnings" hidden></ul>
     <p class="muted hint">Each column is a section, played left to right. Choose its length in bars, and the pattern each grid plays in it, or Off. Every grid starts its pattern from the first step at the start of each section.</p>
   </section>
 
@@ -72,6 +80,11 @@
       <div class="spacer"></div>
       <button id="collect-all" type="button" title="Asks every linked grid for its patterns, and its sound where it has one, and keeps them with this song">Collect all</button>
       <button id="load-all" type="button" title="Puts this song's patterns back into the linked grids, in the slots they came from, and sends the sounds" disabled>Load all</button>
+    </div>
+    <div id="load-offer" class="load-offer" hidden>
+      <span>This song has patterns and sounds kept with it. Put them into the open grids?</span>
+      <button id="offer-load" class="primary" type="button">Load all</button>
+      <button id="offer-dismiss" type="button">Not now</button>
     </div>
     <div id="asset-list" class="asset-list"></div>
     <p class="muted hint">The patterns and sounds this song uses, kept with it. Add picks them from a grid and its library. Collect all copies everything in the open grids. Load puts them into the grids, and &uarr; loads just one. Remove anything the song doesn't need with &times;. Patterns the arrangement plays are marked Used.</p>
@@ -92,6 +105,16 @@
       <button id="import" type="button" title="Adds songs from a backup file">Restore</button>
       <input id="import-file" type="file" accept=".json,application/json" hidden>
     </div>
+  </section>
+
+  <section class="card setlist" aria-labelledby="set-title">
+    <div class="card-head">
+      <h2 id="set-title">Set list</h2>
+      <div class="spacer"></div>
+      <button id="play-set" class="primary" type="button" title="Plays the songs in order, each after the one before ends, putting each one's assets into the grids first" disabled>Play set</button>
+    </div>
+    <ol id="set-list" class="set-list"></ol>
+    <p id="set-empty" class="muted">No songs in the set yet. Click + beside a saved song to add it.</p>
   </section>
   </aside>
 </main>
@@ -124,6 +147,9 @@
       <li>Bars are counted in 4/4. An MPC sequence in another time signature still restarts at each section.</li>
       <li>Every grid starts its pattern from the first step at the start of each section, so they stay together even when their patterns are different lengths.</li>
       <li>The buttons above each section move it left or right, copy it, or delete it. <b>Add section</b> adds a copy of the last one at the end.</li>
+      <li>The strip above the table shows each section as a block as wide as its bars, with the one playing filling up. Drag a block onto another to move it there, and click one to go to its column.</li>
+      <li><b>Tempo, fills, presets</b> shows more for each section. <b>Tempo</b> plays it at its own BPM, or leave it empty for the song's. <b>Transpose</b> shifts the notes of every grid but MPC Grid. Each grid's <b>Fill</b> plays in the section's last bar in place of its pattern, or <b>Off</b> for a gap, and needs a section of two bars or more. <b>Preset</b>, for S-1, Protein and Bass Station, sends a program change to pick that preset as the section starts.</li>
+      <li>Warnings under the table point out patterns the arrangement plays that aren't kept with the song, once some are kept from that grid, and TD-3 patterns missing from its library. Their cells are marked.</li>
     </ul>
 
     <h3>Playing</h3>
@@ -135,6 +161,9 @@
       <li>The <b>up next</b> button (&#187;) plays that section when the one playing finishes its run through, even if it's looping. It stays orange until then, and clicking it again cancels it.</li>
       <li>The bar under the section playing fills as it plays, with the bar it's on beside it. <b>&#9664; Section</b> and <b>Section &#9654;</b>, at the top, jump to the start of the section before or after, on the next bar.</li>
       <li>Changes to the arrangement while it plays take effect the next time you press Play.</li>
+      <li><b>M</b> beside a grid mutes it, and <b>S</b> solos it, muting every other grid. With any soloed, only those play. They work while the song plays, on the next bar, and stay as they are when you press Play.</li>
+      <li><b>Count-in</b> clicks for a bar on this computer before the song starts.</li>
+      <li>Keys while it plays: <b>1</b> to <b>9</b> play that section next, <b>L</b> loops the section playing or lets it go, and <b>&larr;</b> and <b>&rarr;</b> jump a section back or forward.</li>
       <li>While a song plays, the grids switch patterns themselves. Pressing Play on a grid plays it on its own as usual, without the song.</li>
     </ul>
 
@@ -153,8 +182,16 @@
       <li>Sounds are sent straight to the instruments: S-1 Grid's and Protein Grid's controls are set and sent, and the Bass Station's sound is sent through its editor. Undo doesn't bring a sound back, so save one you want to keep first.</li>
     </ul>
 
+    <h3>Takes and set lists</h3>
+    <ul>
+      <li><b>Rec</b> records a take. Press it, then play: every section that plays, in order, with your jumps, loops and up nexts, is saved as a new song in Saved songs when the song stops or you press Rec again. Each pass of a looped section is its own section in the take. R does the same.</li>
+      <li>The <b>Set list</b> plays songs one after another. Click <b>+</b> beside a saved song to add it, and the arrows to change the order. <b>Play set</b> opens each song, puts its assets into the grids, and plays it, then the next when it ends. A song with Loop on doesn't end, so turn Loop off for the set to go on.</li>
+    </ul>
+
     <h3>Saving</h3>
     <ul>
+      <li><b>Export MIDI</b> downloads the arrangement as a MIDI file to open in other music software: a track for each grid, made from the patterns kept with the song, with each section's tempo, transpose, fill and preset. Each section plays once. Patterns that aren't kept are left silent, and the status lists them.</li>
+      <li>When you open a song with assets, Song Grid offers to load them into the grids.</li>
       <li><b>Save</b> keeps the song in this browser under its name, and <b>Save as new</b> keeps a copy. Click a saved song to open it.</li>
       <li>Songs point to pattern numbers in each grid, so changing a grid's pattern changes the song too.</li>
       <li><b>Back up</b> downloads every saved song as a file, and <b>Restore</b> adds songs from one.</li>
