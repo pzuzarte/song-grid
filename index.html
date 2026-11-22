@@ -71,9 +71,10 @@
       <h2 id="assets-title">Assets</h2>
       <div class="spacer"></div>
       <button id="collect-all" type="button" title="Asks every linked grid for its patterns, and its sound where it has one, and keeps them with this song">Collect all</button>
+      <button id="load-all" type="button" title="Puts this song's patterns back into the linked grids, in the slots they came from, and sends the sounds" disabled>Load all</button>
     </div>
     <div id="asset-list" class="asset-list"></div>
-    <p class="muted hint">The patterns and sounds this song uses, kept with it. Collect copies them from the open grids, and replaces what was kept from that grid before. Remove anything the song doesn't need with &times;. Patterns the arrangement plays are marked Used.</p>
+    <p class="muted hint">The patterns and sounds this song uses, kept with it. Collect copies them from the open grids, replacing what was kept from that grid before. Load puts them back into the grids, in the slots they came from, and sends the sounds. Remove anything the song doesn't need with &times;. Patterns the arrangement plays are marked Used.</p>
   </section>
 
   <section class="card songs" aria-labelledby="songs-title">
@@ -144,7 +145,10 @@
       <li>From S-1 Grid, Protein Grid and Bass Station Grid it keeps every pattern with notes or knob movements. From MPC Grid it keeps its sequences, and from TD-3 Grid its grid pattern and its library patterns.</li>
       <li>Sounds: S-1 Grid's sound controls, Protein Grid's mapped settings, and the sound the Bass Station is playing, read from it. The TD-3 and the MPC have no sound to keep this way: the TD-3's is set by its knobs, and the MPC's samples stay in its project.</li>
       <li>Patterns the arrangement plays are marked <b>Used</b>. Remove anything the song doesn't need with &times;.</li>
-      <li>Putting a song's assets back into the grids when you open it is coming next.</li>
+      <li><b>Load all</b> puts the song's assets back into every linked grid, and <b>Load</b> beside a grid puts back just its own. Use it after opening a song, so each grid has the patterns the song was made with.</li>
+      <li>Each pattern goes back into the slot it came from, replacing what's there. Other slots aren't touched. <b>Undo</b> in the grid brings back what was there. In MPC Grid each sequence is undone separately.</li>
+      <li>MPC Grid puts its sequences back into the open project, by number, on the track being edited. They reach the MPC when you save there. TD-3 Grid puts its grid pattern back in the grid, and adds library patterns its library doesn't have.</li>
+      <li>Sounds are sent straight to the instruments: S-1 Grid's and Protein Grid's controls are set and sent, and the Bass Station's sound is sent through its editor. Undo doesn't bring a sound back, so save one you want to keep first.</li>
     </ul>
 
     <h3>Saving</h3>

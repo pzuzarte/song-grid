@@ -535,6 +535,7 @@ const link = Sync.connect({
   status: (message, isError) => { if (isError || !message.startsWith("Playing with")) setStatus(message, isError); },
   peers: renderPeers,
   assetsReceived,
+  assetsLoaded,
 });
 syncBox.checked = true;
 
@@ -579,6 +580,60 @@ function assetsReceived(from, assets, request) {
   }
 }
 
+// Assets being put back into the grids: which request went to which grid, and what each said.
+let loading = null;
+const LOAD_WAIT_MS = 10000; // Bass Station Grid sends its sound through its editor, which can take a few seconds.
+const labelOf = (name) => Song.INSTRUMENTS.find((item) => item.name === name)?.label || name;
+const hasAssets = (name) => Boolean(song.assets[name] && (song.assets[name].patterns.length || song.assets[name].sound));
+const joinNames = (names) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names.join(""));
+
+function loadInto(names) {
+  const targets = names.filter((name) => peers.includes(name) && hasAssets(name));
+  if (!targets.length) {
+    setStatus(names.some(hasAssets) ? "Open the grids in this browser, with Sync ticked, to put the assets back into them." : "This song has no assets to put back. Collect them first.", true);
+    return;
+  }
+  clearTimeout(loading?.timer);
+  loading = { requests: new Map(), results: new Map() };
+  for (const name of targets) {
+    const { patterns, sound } = song.assets[name];
+    const request = link.sendAssets(name, { patterns, sound });
+    if (request) loading.requests.set(request, name);
+  }
+  if (!loading.requests.size) {
+    loading = null;
+    return;
+  }
+  loading.timer = setTimeout(finishLoading, LOAD_WAIT_MS);
+  renderAssets();
+  setStatus(`Putting this song's assets back into ${joinNames(targets.map(labelOf))}...`);
+}
+
+function assetsLoaded(from, result, request) {
+  if (!loading || loading.requests.get(request) !== from) return;
+  loading.results.set(from, result);
+  if (loading.results.size === loading.requests.size) finishLoading();
+  else renderAssets();
+}
+
+// Says how it went once every grid has answered, or the wait is over.
+function finishLoading() {
+  if (!loading) return;
+  clearTimeout(loading.timer);
+  const asked = [...loading.requests.values()];
+  const done = asked.filter((name) => loading.results.get(name)?.ok);
+  const problems = asked.filter((name) => loading.results.has(name) && !loading.results.get(name).ok)
+    .map((name) => `${labelOf(name)}: ${loading.results.get(name).message}`);
+  const silent = asked.filter((name) => !loading.results.has(name));
+  loading = null;
+  renderAssets();
+  const parts = [];
+  if (done.length) parts.push(`Put the assets back into ${joinNames(done.map(labelOf))}. Undo in a grid brings back its patterns as they were.`);
+  parts.push(...problems);
+  if (silent.length) parts.push(`${joinNames(silent.map(labelOf))} didn't answer. Hard-refresh ${silent.length === 1 ? "it" : "them"} to load the latest version, then try again.`);
+  setStatus(parts.join(" "), problems.length > 0 || silent.length > 0);
+}
+
 function removeAsset(name, id) {
   change(() => {
     const kept = song.assets[name];
@@ -588,18 +643,26 @@ function removeAsset(name, id) {
 }
 
 function renderAssets() {
-  $("collect-all").disabled = Boolean(collecting);
+  const busy = Boolean(collecting || loading);
+  $("collect-all").disabled = busy;
+  $("load-all").disabled = busy || !Song.INSTRUMENTS.some(({ name }) => peers.includes(name) && hasAssets(name));
   $("asset-list").replaceChildren(...Song.INSTRUMENTS.map((instrument) => {
     const group = Object.assign(document.createElement("div"), { className: "asset-group" });
     const kept = song.assets[instrument.name];
     const head = Object.assign(document.createElement("div"), { className: "asset-head" });
     const note = document.createElement("small");
+    const waiting = loading && [...loading.requests.values()].includes(instrument.name) && !loading.results.has(instrument.name);
     if (collecting?.asked.has(instrument.name) && !collecting.answered.has(instrument.name)) note.textContent = "Collecting...";
+    else if (waiting) note.textContent = "Putting back...";
     else if (kept) note.textContent = `Collected ${shortDate(kept.collected)}: ${kept.patterns.length} pattern${kept.patterns.length === 1 ? "" : "s"}${kept.sound ? ", sound" : ""}`;
     else note.textContent = "Nothing kept yet";
     const button = toolButton("Collect", peers.includes(instrument.name) ? `Copy ${instrument.name}'s patterns${instrument.library || instrument.word ? "" : " and sound"} into this song` : `Open ${instrument.name}, with Sync ticked, to collect from it`,
-      () => collect([instrument.name]), !peers.includes(instrument.name) || Boolean(collecting));
-    head.append(Object.assign(document.createElement("strong"), { textContent: instrument.label }), note, button);
+      () => collect([instrument.name]), !peers.includes(instrument.name) || busy);
+    const open = peers.includes(instrument.name);
+    const load = toolButton("Load", !hasAssets(instrument.name) ? "Nothing is kept from this grid yet"
+      : open ? `Put this song's ${instrument.label} patterns${kept.sound ? " and sound" : ""} back into ${instrument.name}` : `Open ${instrument.name}, with Sync ticked, to put them back into it`,
+    () => loadInto([instrument.name]), !open || !hasAssets(instrument.name) || busy);
+    head.append(Object.assign(document.createElement("strong"), { textContent: instrument.label }), note, button, load);
     group.append(head);
     if (kept) {
       const list = Object.assign(document.createElement("ul"), { className: "asset-items" });
@@ -751,6 +814,7 @@ function bind() {
   $("section-next").onclick = () => skipSection(1);
   $("add-section").onclick = () => copySection(song.sections.length - 1);
   $("collect-all").onclick = () => collect(Song.INSTRUMENTS.map((item) => item.name));
+  $("load-all").onclick = () => loadInto(Song.INSTRUMENTS.map((item) => item.name));
   $("save").onclick = () => saveSong(false);
   $("save-new").onclick = () => saveSong(true);
   $("new-song").onclick = () => {
