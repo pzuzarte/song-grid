@@ -53,8 +53,36 @@ const Song = (() => {
       bpm: 120,
       loop: false,
       sections: [section({ name: "Intro", bars: 4 }), section({ name: "Main", bars: 8 })],
+      assets: {},
     };
   }
+
+  /* A song's assets: for each grid, the patterns and sound collected from it, kept with the
+     song. Each pattern has an id, the ref the arrangement uses for it (a pattern number, or
+     for TD-3 Grid "grid" or a library id), a label, its length, how many notes it has, and
+     the grid's own data for it. The sound is { label, data }, or null. */
+  function cleanAssets(data) {
+    const assets = {};
+    if (!data || typeof data !== "object") return assets;
+    for (const { name } of INSTRUMENTS) {
+      const item = data[name];
+      if (!item || typeof item !== "object" || !Array.isArray(item.patterns)) continue;
+      const patterns = item.patterns.filter((entry) => entry && typeof entry.id === "string" && typeof entry.label === "string"
+        && (Number.isInteger(entry.ref) || typeof entry.ref === "string") && entry.data && typeof entry.data === "object")
+        .map((entry) => ({
+          id: entry.id.slice(0, 80), ref: entry.ref, label: entry.label.slice(0, 60),
+          length: typeof entry.length === "string" ? entry.length.slice(0, 30) : "",
+          notes: Number.isInteger(entry.notes) ? entry.notes : 0, data: entry.data,
+        }));
+      const sound = item.sound && typeof item.sound.label === "string" && item.sound.data && typeof item.sound.data === "object"
+        ? { label: item.sound.label.slice(0, 80), data: item.sound.data } : null;
+      assets[name] = { collected: typeof item.collected === "string" ? item.collected : "", patterns, sound };
+    }
+    return assets;
+  }
+
+  // Whether the arrangement plays a pattern, by the ref it knows it by.
+  const usesPattern = (song, name, ref) => song.sections.some((item) => item.patterns[name] === ref);
 
   // A song from saved data, with anything missing or wrong set to a default.
   function cleanSong(data) {
@@ -63,6 +91,7 @@ const Song = (() => {
     if (typeof data.name === "string") song.name = data.name.slice(0, 40);
     if (Number.isFinite(data.bpm) && data.bpm >= 20 && data.bpm <= 300) song.bpm = Math.round(data.bpm * 10) / 10;
     song.loop = Boolean(data.loop);
+    song.assets = cleanAssets(data.assets);
     if (Array.isArray(data.sections) && data.sections.length) {
       song.sections = data.sections.slice(0, MAX_SECTIONS).map((item) => section(item, { fill: false }));
       // Each section needs its own id, as copies are moved about separately.
@@ -113,7 +142,7 @@ const Song = (() => {
     return null;
   }
 
-  return { BAR_CHOICES, GRID, INSTRUMENTS, MAX_SECTIONS, PATTERNS, bounds, cleanSong, loops, newSong, plan, section, sectionAt, totalBars };
+  return { BAR_CHOICES, GRID, INSTRUMENTS, MAX_SECTIONS, PATTERNS, bounds, cleanAssets, cleanSong, loops, newSong, plan, section, sectionAt, totalBars, usesPattern };
 })();
 
 if (typeof module !== "undefined") module.exports = Song;

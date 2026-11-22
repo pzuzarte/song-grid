@@ -65,6 +65,17 @@
     <p class="muted hint">Each column is a section, played left to right. Choose its length in bars, and the pattern each grid plays in it, or Off. Every grid starts its pattern from the first step at the start of each section.</p>
   </section>
 
+  <aside class="side">
+  <section class="card assets" aria-labelledby="assets-title">
+    <div class="card-head">
+      <h2 id="assets-title">Assets</h2>
+      <div class="spacer"></div>
+      <button id="collect-all" type="button" title="Asks every linked grid for its patterns, and its sound where it has one, and keeps them with this song">Collect all</button>
+    </div>
+    <div id="asset-list" class="asset-list"></div>
+    <p class="muted hint">The patterns and sounds this song uses, kept with it. Collect copies them from the open grids, and replaces what was kept from that grid before. Remove anything the song doesn't need with &times;. Patterns the arrangement plays are marked Used.</p>
+  </section>
+
   <section class="card songs" aria-labelledby="songs-title">
     <div class="card-head">
       <h2 id="songs-title">Saved songs</h2>
@@ -81,6 +92,7 @@
       <input id="import-file" type="file" accept=".json,application/json" hidden>
     </div>
   </section>
+  </aside>
 </main>
 
 <footer class="bar foot">
@@ -123,6 +135,16 @@
       <li>The bar under the section playing fills as it plays, with the bar it's on beside it. <b>&#9664; Section</b> and <b>Section &#9654;</b>, at the top, jump to the start of the section before or after, on the next bar.</li>
       <li>Changes to the arrangement while it plays take effect the next time you press Play.</li>
       <li>While a song plays, the grids switch patterns themselves. Pressing Play on a grid plays it on its own as usual, without the song.</li>
+    </ul>
+
+    <h3>Assets</h3>
+    <ul>
+      <li>The <b>Assets</b> panel keeps the patterns and sounds this song uses, with the song, so they're in one place and saved with it, in its backups too.</li>
+      <li><b>Collect all</b> asks every linked grid for its patterns, and its sound where it has one. <b>Collect</b> beside a grid asks just that one. Collecting again replaces what was kept from that grid.</li>
+      <li>From S-1 Grid, Protein Grid and Bass Station Grid it keeps every pattern with notes or knob movements. From MPC Grid it keeps its sequences, and from TD-3 Grid its grid pattern and its library patterns.</li>
+      <li>Sounds: S-1 Grid's sound controls, Protein Grid's mapped settings, and the sound the Bass Station is playing, read from it. The TD-3 and the MPC have no sound to keep this way: the TD-3's is set by its knobs, and the MPC's samples stay in its project.</li>
+      <li>Patterns the arrangement plays are marked <b>Used</b>. Remove anything the song doesn't need with &times;.</li>
+      <li>Putting a song's assets back into the grids when you open it is coming next.</li>
     </ul>
 
     <h3>Saving</h3>

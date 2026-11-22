@@ -89,3 +89,30 @@ test("sections with Loop on repeat, as the plan tells every grid", () => {
   for (let i = 0; i < 11; i += 1) { Sync.songNextBar(part); heard.push(part.bar); }
   assert.deepEqual(heard, [0, 1, 2, 3, 4, 5, 2, 3, 4, 5, 2, 3]);
 });
+
+test("a song keeps the assets collected from each grid", () => {
+  const song = Song.cleanSong({
+    sections: [{ name: "A", bars: 4, patterns: { "S-1 Grid": 2, "TD-3 Grid": "pacid" } }],
+    assets: {
+      "S-1 Grid": {
+        collected: "2026-11-21T10:00:00.000Z",
+        patterns: [
+          { id: "slot:2", ref: 2, label: "Pattern 3", length: "2 bars", notes: 12, data: { bars: 2, notes: [] } },
+          { id: "slot:5", ref: 5, label: "Pattern 6", length: "1 bar", notes: 4, data: { bars: 1, notes: [] } },
+          { id: "broken", label: "No data" },
+        ],
+        sound: { label: "The sound in S-1 Grid's controls", data: { values: { 74: 64 } } },
+      },
+      "TD-3 Grid": { patterns: [{ id: "td3:pacid", ref: "pacid", label: "Acid A", data: { steps: [] } }], sound: null },
+      "Somewhere else": { patterns: [] },
+    },
+  });
+  assert.deepEqual(Object.keys(song.assets), ["S-1 Grid", "TD-3 Grid"]);
+  assert.deepEqual(song.assets["S-1 Grid"].patterns.map((item) => item.label), ["Pattern 3", "Pattern 6"]);
+  assert.equal(song.assets["S-1 Grid"].sound.label, "The sound in S-1 Grid's controls");
+  assert.equal(song.assets["TD-3 Grid"].sound, null);
+  assert.equal(Song.usesPattern(song, "S-1 Grid", 2), true);
+  assert.equal(Song.usesPattern(song, "S-1 Grid", 5), false);
+  assert.equal(Song.usesPattern(song, "TD-3 Grid", "pacid"), true);
+  assert.deepEqual(Song.newSong().assets, {});
+});

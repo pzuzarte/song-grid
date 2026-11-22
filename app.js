@@ -271,6 +271,7 @@ function render() {
   }
   table.replaceChildren(...rows);
   renderPlaying();
+  renderAssets();
   renderSongs();
 }
 
@@ -533,8 +534,99 @@ const link = Sync.connect({
   // Each grid says when it has joined in, which the line about the song already covers.
   status: (message, isError) => { if (isError || !message.startsWith("Playing with")) setStatus(message, isError); },
   peers: renderPeers,
+  assetsReceived,
 });
 syncBox.checked = true;
+
+/* ---------- Assets ---------- */
+
+// A collection under way: its request id, the grids asked, and which have answered.
+let collecting = null;
+const COLLECT_WAIT_MS = 4000;
+const shortDate = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "");
+
+function collect(names) {
+  const asked = names.filter((name) => peers.includes(name));
+  if (!asked.length) {
+    setStatus("Open the grids in this browser, with Sync ticked, to collect from them.", true);
+    return;
+  }
+  const request = link.requestAssets();
+  if (!request) return;
+  clearTimeout(collecting?.timer);
+  collecting = { request, asked: new Set(asked), answered: new Set() };
+  collecting.timer = setTimeout(() => {
+    const missing = [...collecting.asked].filter((name) => !collecting.answered.has(name));
+    if (missing.length) setStatus(`${missing.join(" and ")} didn't answer. Hard-refresh ${missing.length === 1 ? "it" : "them"} to load the latest version, then collect again.`, true);
+    collecting = null;
+    renderAssets();
+  }, COLLECT_WAIT_MS);
+  renderAssets();
+  setStatus(`Collecting from ${asked.join(", ")}...`);
+}
+
+function assetsReceived(from, assets, request) {
+  if (!collecting || request !== collecting.request || !collecting.asked.has(from)) return;
+  collecting.answered.add(from);
+  const kept = Song.cleanAssets({ [from]: { ...assets, collected: new Date().toISOString() } })[from];
+  if (kept) change(() => { song.assets[from] = kept; });
+  const label = Song.INSTRUMENTS.find((item) => item.name === from)?.label || from;
+  setStatus(`Collected ${kept?.patterns.length || 0} pattern${kept?.patterns.length === 1 ? "" : "s"}${kept?.sound ? " and the sound" : ""} from ${label}.`);
+  if (collecting.answered.size === collecting.asked.size) {
+    clearTimeout(collecting.timer);
+    collecting = null;
+    renderAssets();
+  }
+}
+
+function removeAsset(name, id) {
+  change(() => {
+    const kept = song.assets[name];
+    if (id === "sound") kept.sound = null;
+    else kept.patterns = kept.patterns.filter((item) => item.id !== id);
+  });
+}
+
+function renderAssets() {
+  $("collect-all").disabled = Boolean(collecting);
+  $("asset-list").replaceChildren(...Song.INSTRUMENTS.map((instrument) => {
+    const group = Object.assign(document.createElement("div"), { className: "asset-group" });
+    const kept = song.assets[instrument.name];
+    const head = Object.assign(document.createElement("div"), { className: "asset-head" });
+    const note = document.createElement("small");
+    if (collecting?.asked.has(instrument.name) && !collecting.answered.has(instrument.name)) note.textContent = "Collecting...";
+    else if (kept) note.textContent = `Collected ${shortDate(kept.collected)}: ${kept.patterns.length} pattern${kept.patterns.length === 1 ? "" : "s"}${kept.sound ? ", sound" : ""}`;
+    else note.textContent = "Nothing kept yet";
+    const button = toolButton("Collect", peers.includes(instrument.name) ? `Copy ${instrument.name}'s patterns${instrument.library || instrument.word ? "" : " and sound"} into this song` : `Open ${instrument.name}, with Sync ticked, to collect from it`,
+      () => collect([instrument.name]), !peers.includes(instrument.name) || Boolean(collecting));
+    head.append(Object.assign(document.createElement("strong"), { textContent: instrument.label }), note, button);
+    group.append(head);
+    if (kept) {
+      const list = Object.assign(document.createElement("ul"), { className: "asset-items" });
+      for (const item of kept.patterns) {
+        const row = document.createElement("li");
+        row.append(Object.assign(document.createElement("span"), { className: "name", textContent: item.label, title: item.label }));
+        if (Song.usesPattern(song, instrument.name, item.ref)) row.append(Object.assign(document.createElement("span"), { className: "used", textContent: "Used" }));
+        row.append(Object.assign(document.createElement("span"), { className: "meta", textContent: `${item.length}${item.length ? ", " : ""}${item.notes} note${item.notes === 1 ? "" : "s"}` }));
+        const remove = toolButton("\u00d7", `Remove ${item.label} from this song's assets`, () => removeAsset(instrument.name, item.id));
+        remove.setAttribute("aria-label", `Remove ${item.label}`);
+        row.append(remove);
+        list.append(row);
+      }
+      if (kept.sound) {
+        const row = Object.assign(document.createElement("li"), { className: "sound" });
+        row.append(Object.assign(document.createElement("span"), { className: "name", textContent: kept.sound.label, title: kept.sound.label }));
+        const remove = toolButton("\u00d7", "Remove the sound from this song's assets", () => removeAsset(instrument.name, "sound"));
+        remove.setAttribute("aria-label", `Remove ${instrument.label} sound`);
+        row.append(remove);
+        list.append(row);
+      }
+      if (!kept.patterns.length && !kept.sound) list.append(Object.assign(document.createElement("li"), { className: "meta", textContent: "No patterns or sound." }));
+      group.append(list);
+    }
+    return group;
+  }));
+}
 
 /* ---------- Saved songs ---------- */
 
@@ -658,6 +750,7 @@ function bind() {
   $("section-back").onclick = () => skipSection(-1);
   $("section-next").onclick = () => skipSection(1);
   $("add-section").onclick = () => copySection(song.sections.length - 1);
+  $("collect-all").onclick = () => collect(Song.INSTRUMENTS.map((item) => item.name));
   $("save").onclick = () => saveSong(false);
   $("save-new").onclick = () => saveSong(true);
   $("new-song").onclick = () => {
