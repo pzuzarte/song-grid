@@ -98,6 +98,23 @@ function td3Library() {
   return Array.isArray(items) ? items.filter((item) => item && typeof item.id === "string" && typeof item.name === "string") : [];
 }
 
+// The patterns kept in the song's assets for a grid, as menu choices: their names, by the
+// pattern number each goes in. A number the arrangement uses with nothing kept for it
+// shows as such, so older songs still show what they play.
+function assetOptions(instrument, value, prefix = "") {
+  const kept = song.assets[instrument.name]?.patterns || [];
+  const options = kept.map((entry) => new Option(`${prefix}${entry.label}`, String(entry.ref)));
+  if (Number.isInteger(value) && !kept.some((entry) => entry.ref === value)) {
+    options.push(new Option(`${prefix}${instrument.word || "Pattern"} ${value + 1} (not in Assets)`, String(value)));
+  }
+  if (!kept.length) {
+    const hint = new Option(`Add ${instrument.label} patterns in Assets`, "hint");
+    hint.disabled = true;
+    options.push(hint);
+  }
+  return options;
+}
+
 function patternSelect(item, instrument) {
   const { name } = instrument;
   const select = document.createElement("select");
@@ -110,8 +127,7 @@ function patternSelect(item, instrument) {
       select.append(new Option("(not in the library)", value));
     }
   } else {
-    const word = instrument.word || "Pattern";
-    select.append(new Option("Off", ""), ...Array.from({ length: Song.PATTERNS }, (_, index) => new Option(`${word} ${index + 1}`, String(index))));
+    select.append(new Option("Off", ""), ...assetOptions(instrument, value));
   }
   select.value = value === null ? "" : String(value);
   select.classList.toggle("off", value === null);
@@ -129,12 +145,11 @@ function fillSelect(item, instrument) {
   const { name } = instrument;
   const select = document.createElement("select");
   select.className = "fill-select";
-  const word = instrument.word || "Pattern";
   select.append(new Option("No fill", "none"), new Option("Fill: Off", "off"));
   if (instrument.library) {
     select.append(new Option("Fill: Grid pattern", Song.GRID), ...td3Library().map((entry) => new Option(`Fill: ${entry.name}`, entry.id)));
   } else {
-    select.append(...Array.from({ length: Song.PATTERNS }, (_, index) => new Option(`Fill: ${word} ${index + 1}`, String(index))));
+    select.append(...assetOptions(instrument, item.fills[name], "Fill: ").filter((option) => option.value !== "hint"));
   }
   const value = item.fills[name];
   select.value = !(name in item.fills) ? "none" : value === null ? "off" : String(value);
@@ -950,6 +965,56 @@ function finishLoading() {
   setStatus(parts.join(" "), problems.length > 0 || silent.length > 0);
 }
 
+/* ---------- Adding pattern files to the assets ---------- */
+
+// The files each grid saves its patterns as. MPC Grid's sequences live in its projects,
+// so they're added from the grid with Add.
+const FILE_TYPES = {
+  "S-1 Grid": { description: "S-1 patch", accept: { "application/octet-stream": [".PRM"] } },
+  "Protein Grid": { description: "Protein Grid pattern", accept: { "application/json": [".json"] } },
+  "Bass Station Grid": { description: "Bass Station Grid pattern", accept: { "application/json": [".json"] } },
+  "TD-3 Grid": { description: "TD-3 pattern", accept: { "application/octet-stream": [".syx"] } },
+};
+
+// Opens pattern files with the Mac's Open dialog, and has the grid read them with its own
+// code, so they come in as it saves them, sound included. They're kept with the song.
+async function addFiles(name) {
+  const type = FILE_TYPES[name];
+  if (!type || !("showOpenFilePicker" in window)) {
+    setStatus("Adding files needs Chrome or Edge on a computer.", true);
+    return;
+  }
+  let handles;
+  try {
+    handles = await window.showOpenFilePicker({ id: `song-grid-${labelOf(name).replace(/\W+/g, "-").toLowerCase()}`, types: [type], multiple: true });
+  } catch (error) {
+    if (error.name !== "AbortError") setStatus(`Couldn't open the files: ${error.message}`, true);
+    return;
+  }
+  const files = await Promise.all(handles.map(async (handle) => {
+    const file = await handle.getFile();
+    return { name: file.name, bytes: Array.from(new Uint8Array(await file.arrayBuffer())) };
+  }));
+  setStatus(`Asking ${labelOf(name)} to read ${files.length === 1 ? files[0].name : `${files.length} files`}...`);
+  let got;
+  try {
+    got = await link.ask(name, "readFiles", { files }, 10000);
+  } catch (error) {
+    setStatus(`${labelOf(name)} couldn't read them: ${error.message}. Hard-refresh it to load the latest version, then try again.`, true);
+    return;
+  }
+  const patterns = Array.isArray(got?.patterns) ? got.patterns : [];
+  const skipped = Array.isArray(got?.skipped) ? got.skipped : [];
+  let result = { added: 0, full: 0 };
+  if (patterns.length) change(() => { result = Song.addAssets(song, name, { patterns }); });
+  renderAssets();
+  const parts = [];
+  if (result.added) parts.push(`Added ${result.added} ${labelOf(name)} pattern${result.added === 1 ? "" : "s"} to the song's assets. Choose ${result.added === 1 ? "it" : "them"} in the sections.`);
+  if (result.full) parts.push(`${result.full} didn't fit, as all ${Song.PATTERNS} pattern numbers hold one. Remove some from the assets first.`);
+  if (skipped.length) parts.push(`${skipped.join(", ")} ${skipped.length === 1 ? "isn't a pattern" : "aren't patterns"} ${labelOf(name)} can read.`);
+  setStatus(parts.join(" ") || "Nothing was added.", !result.added);
+}
+
 /* ---------- Picking assets from a grid ---------- */
 
 // The grid being picked from, what it offered, and what's ticked.
@@ -1116,7 +1181,12 @@ function renderAssets() {
     const load = toolButton("Load", !hasAssets(instrument.name) ? "Nothing is kept from this grid yet"
       : open ? `Put this song's ${instrument.label} patterns${kept.sound ? " and sound" : ""} back into ${instrument.name}` : `Open ${instrument.name}, with Sync ticked, to put them back into it`,
     () => loadInto([instrument.name]), !open || !hasAssets(instrument.name) || busy);
-    head.append(Object.assign(document.createElement("strong"), { textContent: instrument.label }), note, button, load);
+    head.append(Object.assign(document.createElement("strong"), { textContent: instrument.label }), note, button);
+    if (FILE_TYPES[instrument.name]) {
+      head.append(toolButton("Add file\u2026", open ? `Choose ${instrument.label} pattern files on this computer to keep with this song` : `Open ${instrument.name}, with Sync ticked, to read its files`,
+        () => addFiles(instrument.name), !open || busy));
+    }
+    head.append(load);
     group.append(head);
     if (kept) {
       const list = Object.assign(document.createElement("ul"), { className: "asset-items" });

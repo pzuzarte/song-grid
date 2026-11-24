@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Song Grid</title>
-<link rel="stylesheet" href="style.css?v=202611232252">
+<link rel="stylesheet" href="style.css?v=202611240021">
 <script>
   // Set before the page draws, so it doesn't flash the other theme.
   try { if ((localStorage.getItem("midi-grids-theme") || localStorage.getItem("song-grid-theme")) === "light") document.documentElement.dataset.theme = "light"; } catch {}
@@ -141,7 +141,7 @@
     <ul>
       <li>Each column is a section, such as Intro, Verse or Chorus, played left to right. Click its name to change it.</li>
       <li><b>Bars</b> sets how long the section lasts.</li>
-      <li>Each row is a grid. Choose the pattern it plays in that section, 1 to 16, or <b>Off</b> for silence. For MPC Grid these are its sequences. A pattern shorter than its section repeats, and a longer one is cut at the section's end.</li>
+      <li>Each row is a grid. Choose the pattern it plays in that section, from the patterns kept in the song's <b>Assets</b>, by name, or <b>Off</b> for silence. Add patterns to the assets first, from the grid or from files. A pattern number the song plays with nothing kept for it shows as "(not in Assets)". A pattern shorter than its section repeats, and a longer one is cut at the section's end.</li>
       <li>TD-3 Grid edits one pattern at a time, so its row offers <b>Grid pattern</b>, whatever is in TD-3 Grid when the song plays, and the patterns saved in its library, by name. A library pattern plays without changing the grid. Patterns saved in its pattern folder aren't listed: save them to the library to use them in a song.</li>
       <li>Bars are counted in 4/4. An MPC sequence in another time signature still restarts at each section.</li>
       <li>Every grid starts its pattern from the first step at the start of each section, so they stay together even when their patterns are different lengths.</li>
@@ -169,6 +169,7 @@
     <h3>Assets</h3>
     <ul>
       <li>The <b>Assets</b> panel keeps the patterns and sounds this song uses, with the song, so they're in one place and saved with it, in its backups too.</li>
+      <li><b>Add file&hellip;</b>, beside a grid, opens the Mac's Open dialog to choose pattern files on this computer: S-1 patch files, Protein Grid and Bass Station Grid pattern files, or TD-3 .syx files. Choose several at once if you like. The grid reads them as it would its own, so they come with their names, and the Bass Station's and Protein's with their sounds, and they're kept with the song. TD-3 patterns are added to its library too. The grid needs to be open with Sync ticked. It remembers the last folder you used for each grid.</li>
       <li><b>Add</b>, beside a grid, lists what it has: the patterns in it now, the patterns saved in its library, and sounds. Tick the ones this song needs, choose a sound if you want one, and press <b>Add to song</b>. Search, and <b>&#9733; Favourites</b>, narrow a long library.</li>
       <li>What each offers: S-1 Grid, its patterns and the patches in its library, as patterns and as sounds. Protein Grid and Bass Station Grid, their patterns, the patterns saved in their library folder, and the sounds in their sound library. MPC Grid, the sequences in the open project. TD-3 Grid, its grid pattern and its library. The grid needs its library folder open to list it.</li>
       <li>A song keeps one sound for each grid: the one you pick replaces the one it had. Protein Grid reads only the settings you've mapped from a sound, so click Teach reading on its Synth tab once first. The TD-3 and the MPC have no sound to keep: the TD-3's is set by its knobs, and the MPC's samples stay in its project.</li>
@@ -216,9 +217,9 @@
   </div>
 </dialog>
 
-<script src="sync.js?v=202611232252"></script>
-<script src="song.js?v=202611232252"></script>
-<script src="app.js?v=202611232252"></script>
+<script src="sync.js?v=202611240021"></script>
+<script src="song.js?v=202611240021"></script>
+<script src="app.js?v=202611240021"></script>
 <script>
   // The tools menu closes when you click elsewhere or press Escape.
   document.addEventListener("click", (event) => {
