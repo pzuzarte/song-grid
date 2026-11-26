@@ -21,8 +21,8 @@
   <label>Song
     <input id="song-name" type="text" maxlength="40" placeholder="Untitled" spellcheck="false">
   </label>
-  <button id="play" class="primary" type="button" title="Starts the open grids playing the song (Space)">Play</button>
-  <button id="record" class="record" type="button" aria-pressed="false" title="Records a take: every section that plays, with your jumps and loops, saved in order as a new song when it stops (R)">Rec</button>
+  <button id="play" class="primary" type="button" title="Starts the open grids playing the song (Space)" data-icon="auto">Play</button>
+  <button id="record" class="record" type="button" aria-pressed="false" title="Records a take: every section that plays, with your jumps and loops, saved in order as a new song when it stops (R)" data-icon="auto">Rec</button>
   <label>BPM
     <input id="bpm" type="number" min="20" max="300" step="0.1" value="120">
   </label>
@@ -51,7 +51,7 @@
     </nav>
   </details>
   <button id="theme-toggle" class="theme-toggle" type="button" title="Switch between dark and light mode, for all the grids" aria-label="Dark or light mode">☀</button>
-  <button id="help-open" type="button" title="Help (press ?)">Help</button>
+  <button id="help-open" type="button" title="Help (press ?)" data-icon="help">Help</button>
 </header>
 
 <main class="main">
@@ -77,8 +77,8 @@
     <div class="card-head">
       <h2 id="assets-title">Assets</h2>
       <div class="spacer"></div>
-      <button id="collect-all" type="button" title="Asks every linked grid for its patterns, and its sound where it has one, and keeps them with this song">Collect all</button>
-      <button id="load-all" type="button" title="Puts this song's patterns back into the linked grids, in the slots they came from, and sends the sounds" disabled>Load all</button>
+      <button id="collect-all" type="button" title="Asks every linked grid for its patterns, and its sound where it has one, and keeps them with this song" data-icon="collect">Collect all</button>
+      <button id="load-all" type="button" title="Puts this song's patterns back into the linked grids, in the slots they came from, and sends the sounds" disabled data-icon="load">Load all</button>
     </div>
     <div id="load-offer" class="load-offer" hidden>
       <span>This song has patterns and sounds kept with it. Put them into the open grids?</span>
@@ -93,9 +93,9 @@
     <div class="card-head">
       <h2 id="songs-title">Saved songs</h2>
       <div class="spacer"></div>
-      <button id="save" type="button" title="Saves this song in this browser under its name">Save</button>
-      <button id="save-new" type="button" title="Saves it as a new song, keeping the one it was loaded from">Save as new</button>
-      <button id="new-song" type="button" title="Starts a new song. Unsaved changes are lost.">New</button>
+      <button id="save" type="button" title="Saves this song in this browser under its name" data-icon="save">Save</button>
+      <button id="save-new" type="button" title="Saves it as a new song, keeping the one it was loaded from" data-icon="save-as">Save as new</button>
+      <button id="new-song" type="button" title="Starts a new song. Unsaved changes are lost." data-icon="new">New</button>
     </div>
     <ul id="song-list" class="song-list"></ul>
     <p id="songs-empty" class="muted">No saved songs yet.</p>
@@ -110,7 +110,7 @@
     <div class="card-head">
       <h2 id="set-title">Set list</h2>
       <div class="spacer"></div>
-      <button id="play-set" class="primary" type="button" title="Plays the songs in order, each after the one before ends, putting each one's assets into the grids first" disabled>Play set</button>
+      <button id="play-set" class="primary" type="button" title="Plays the songs in order, each after the one before ends, putting each one's assets into the grids first" disabled data-icon="auto">Play set</button>
     </div>
     <ol id="set-list" class="set-list"></ol>
     <p id="set-empty" class="muted">No songs in the set yet. Click + beside a saved song to add it.</p>
@@ -142,7 +142,7 @@
       <li>Each column is a section, such as Intro, Verse or Chorus, played left to right. Click its name to change it.</li>
       <li><b>Bars</b> sets how long the section lasts.</li>
       <li>Each row is a grid. Choose the pattern it plays in that section, from the patterns kept in the song's <b>Assets</b>, by name, or <b>Off</b> for silence. Add patterns to the assets first, from the grid or from files. A pattern number the song plays with nothing kept for it shows as "(not in Assets)". A pattern shorter than its section repeats, and a longer one is cut at the section's end.</li>
-      <li>TD-3 Grid edits one pattern at a time, so its row offers <b>Grid pattern</b>, whatever is in TD-3 Grid when the song plays, and the patterns saved in its library, by name. A library pattern plays without changing the grid. Patterns saved in its pattern folder aren't listed: save them to the library to use them in a song.</li>
+      <li>TD-3 Grid edits one pattern at a time, so its row offers <b>Grid pattern</b>, whatever is in TD-3 Grid when the song plays, and the patterns saved in its library, by name. A library pattern plays without changing the grid. Its library is kept in its library folder, so every pattern saved there is listed.</li>
       <li>Bars are counted in 4/4. An MPC sequence in another time signature still restarts at each section.</li>
       <li>Every grid starts its pattern from the first step at the start of each section, so they stay together even when their patterns are different lengths.</li>
       <li>The buttons above each section move it left or right, copy it, or delete it. <b>Add section</b> adds a copy of the last one at the end.</li>
@@ -171,7 +171,7 @@
       <li>The <b>Assets</b> panel keeps the patterns and sounds this song uses, with the song, so they're in one place and saved with it, in its backups too.</li>
       <li><b>Add file&hellip;</b>, beside a grid, opens the Mac's Open dialog to choose pattern files on this computer: S-1 patch files, Protein Grid and Bass Station Grid pattern files, or TD-3 .syx files. Choose several at once if you like. The grid reads them as it would its own, so they come with their names, and the Bass Station's and Protein's with their sounds, and they're kept with the song. TD-3 patterns are added to its library too. The grid needs to be open with Sync ticked. It remembers the last folder you used for each grid.</li>
       <li><b>Add</b>, beside a grid, lists what it has: the patterns in it now, the patterns saved in its library, and sounds. Tick the ones this song needs, choose a sound if you want one, and press <b>Add to song</b>. Search, and <b>&#9733; Favourites</b>, narrow a long library.</li>
-      <li>What each offers: S-1 Grid, its patterns and the patches in its library, as patterns and as sounds. Protein Grid and Bass Station Grid, their patterns, the patterns saved in their library folder, and the sounds in their sound library. MPC Grid, the sequences in the open project. TD-3 Grid, its grid pattern and its library. The grid needs its library folder open to list it.</li>
+      <li>What each offers: S-1 Grid, its patterns and the patches in its library, as patterns and as sounds. Protein Grid and Bass Station Grid, their patterns, the patterns saved in their library folder, and the sounds in their sound library. MPC Grid, the sequences in the open project. TD-3 Grid, its grid pattern and its library. A grid needs its library folder open to list it: Choose library folder, or Allow library folder, is beside Save in each grid.</li>
       <li>A song keeps one sound for each grid: the one you pick replaces the one it had. Protein Grid reads only the settings you've mapped from a sound, so click Teach reading on its Synth tab once first. The TD-3 and the MPC have no sound to keep: the TD-3's is set by its knobs, and the MPC's samples stay in its project.</li>
       <li>Each pattern kept goes in a pattern number, shown beside it. One from a grid keeps its own. One from a library goes in the first number the arrangement plays that has nothing kept for it, or else the first free one. Choose another number to move it, which swaps it with the pattern there.</li>
       <li><b>Collect all</b> copies everything in every linked grid at once: each pattern with notes or knob movements, and the sound in its controls, or the one the Bass Station is playing. It replaces what was kept from each grid before.</li>
@@ -219,6 +219,7 @@
 
 <script src="sync.js?v=202611240021"></script>
 <script src="song.js?v=202611240021"></script>
+<script src="grid-icons.js?v=202611261000"></script>
 <script src="app.js?v=202611240021"></script>
 <script>
   // The tools menu closes when you click elsewhere or press Escape.
