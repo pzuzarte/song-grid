@@ -25,7 +25,9 @@ const SETLIST_KEY = "song-grid-setlist";
 // The grids muted, and soloed, with the buttons beside each. Kept while the page is open.
 const mix = { muted: new Set(), solo: new Set() };
 // Choices kept in this browser: a count-in, and showing each section's extra settings.
-const prefs = { countIn: false, more: false };
+const prefs = { countIn: false, more: false, tab: "parts", zoom: 24 };
+// The block picked in the arranger, by id.
+let selected = null;
 // Recording a take: whether it's on, and the sections played since it started, in order.
 const take = { on: false, sections: [] };
 // The set list, as saved song ids, and while one plays, which song it's on.
@@ -61,6 +63,8 @@ function restore() {
   const kept = readJson(PREFS_KEY, {});
   prefs.countIn = Boolean(kept.countIn);
   prefs.more = Boolean(kept.more);
+  prefs.tab = kept.tab === "arranger" ? "arranger" : "parts";
+  prefs.zoom = ZOOMS.includes(kept.zoom) ? kept.zoom : 24;
   const list = readJson(SETLIST_KEY, []);
   setList = Array.isArray(list) ? list.filter((id) => typeof id === "string") : [];
 }
@@ -242,32 +246,53 @@ function moveSection(index, by) {
   });
 }
 
+// Adds a copy of a part after it, in its own colour, and puts it at the end of the arranger.
 function copySection(index) {
   if (song.sections.length >= Song.MAX_SECTIONS) {
-    setStatus(`A song can have up to ${Song.MAX_SECTIONS} sections.`, true);
+    setStatus(`A song can have up to ${Song.MAX_SECTIONS} parts.`, true);
     return;
   }
+  let copy = null;
   change((target) => {
-    const copy = Song.section({ ...JSON.parse(JSON.stringify(target.sections[index])), id: undefined });
+    copy = Song.section({ ...JSON.parse(JSON.stringify(target.sections[index])), id: undefined, colour: Song.freeColour(target.sections) });
     target.sections.splice(index + 1, 0, copy);
+    if (target.order.length < Song.MAX_BLOCKS) target.order.push(Song.block(copy.id));
   });
+  setStatus(`Added "${copy.name}", and put it at the end of the arranger.`);
 }
 
+// Deletes a part, and its blocks in the arranger.
 function deleteSection(index) {
   if (song.sections.length === 1) {
-    setStatus("A song needs at least one section.", true);
+    setStatus("A song needs at least one part.", true);
     return;
   }
-  const { name } = song.sections[index];
-  change((target) => target.sections.splice(index, 1));
-  setStatus(`Deleted "${name}".`);
+  const { name, id } = song.sections[index];
+  const count = song.order.filter((item) => item.part === id).length;
+  if (count > 1 && !window.confirm(`Delete "${name}"? It's in the arranger ${count} times, and those blocks go too.`)) return;
+  change((target) => {
+    target.sections.splice(index, 1);
+    target.order = target.order.filter((item) => item.part !== id);
+  });
+  setStatus(`Deleted "${name}"${count ? `, and its block${count === 1 ? "" : "s"} in the arranger` : ""}.`);
+}
+
+// Gives a part the next colour.
+function cycleColour(index) {
+  change((target) => {
+    const item = target.sections[index];
+    item.colour = ((item.colour ?? -1) + 1) % Song.COLOURS;
+  });
 }
 
 function render() {
   $("song-name").value = song.name;
   $("bpm").value = String(playback.on ? playback.bpm : song.bpm);
   $("loop").checked = song.loop;
-  $("total").textContent = `${song.sections.length} section${song.sections.length === 1 ? "" : "s"}, ${Song.totalBars(song)} bars`;
+  $("total").textContent = prefs.tab === "parts"
+    ? `${song.sections.length} part${song.sections.length === 1 ? "" : "s"}`
+    : `${song.order.length} block${song.order.length === 1 ? "" : "s"}, ${Song.totalBars(song)} bars, ${clock(Song.seconds(song))}`;
+  renderTabs();
 
   const table = $("table");
   const rows = [];
@@ -277,7 +302,7 @@ function render() {
   const tools = document.createElement("tr");
   tools.append(document.createElement("th"));
   const names = document.createElement("tr");
-  names.append(Object.assign(document.createElement("th"), { textContent: "Section" }));
+  names.append(Object.assign(document.createElement("th"), { textContent: "Part" }));
   const bars = document.createElement("tr");
   bars.append(Object.assign(document.createElement("th"), { textContent: "Bars" }));
   song.sections.forEach((item, index) => {
@@ -285,10 +310,10 @@ function render() {
     cell.className = "section-tools";
     cell.dataset.section = String(index);
     cell.append(
-      toolButton("<", "Move this section left", () => moveSection(index, -1), index === 0),
-      toolButton(">", "Move this section right", () => moveSection(index, 1), index === count - 1),
-      toolButton("Copy", "Add a copy of this section after it", () => copySection(index)),
-      toolButton("Del", "Delete this section", () => deleteSection(index)),
+      toolButton("<", "Move this part left. The order here is only for editing: the Arranger sets the order they play.", () => moveSection(index, -1), index === 0),
+      toolButton(">", "Move this part right. The order here is only for editing: the Arranger sets the order they play.", () => moveSection(index, 1), index === count - 1),
+      toolButton("Copy", "Add a copy of this part after it, and at the end of the arranger", () => copySection(index)),
+      toolButton("Del", "Delete this part, and its blocks in the arranger", () => deleteSection(index)),
     );
 
     tools.append(cell);
@@ -299,9 +324,18 @@ function render() {
     name.type = "text";
     name.maxLength = 30;
     name.value = item.name;
-    name.setAttribute("aria-label", `Section ${index + 1} name`);
-    name.onchange = () => change(() => { item.name = name.value.trim() || `Section ${index + 1}`; });
-    nameCell.append(name);
+    name.setAttribute("aria-label", `Part ${index + 1} name`);
+    name.onchange = () => change(() => { item.name = name.value.trim() || `Part ${index + 1}`; });
+    const used = song.order.filter((entry) => entry.part === item.id).length;
+    const swatch = toolButton("", `${item.name}'s colour in the arranger. Click for the next one.`, () => cycleColour(index));
+    swatch.className = "swatch";
+    swatch.style.setProperty("--part", partColour(item));
+    swatch.setAttribute("aria-label", `Change ${item.name}'s colour`);
+    const inner = Object.assign(document.createElement("div"), { className: "name-cell" });
+    inner.append(swatch, name);
+    nameCell.append(inner);
+    nameCell.title = used ? `In the arranger ${used} time${used === 1 ? "" : "s"}` : "Not in the arranger yet";
+    nameCell.classList.toggle("unused", !used);
     names.append(nameCell);
 
     const barsCell = document.createElement("td");
@@ -322,13 +356,14 @@ function render() {
     const cell = document.createElement("td");
     cell.className = "section-play";
     cell.dataset.section = String(index);
-    const queued = playback.queued?.index === index;
+    cell.dataset.part = item.id;
+    const queued = playback.queued?.part === item.id;
     const loop = iconButton("loop", `Loop ${item.name}`,
-      item.loop ? "Looping: this section repeats each time it's reached. Click to stop it looping." : "Loop: repeat this section each time it's reached, until you click again",
+      item.loop ? "Looping: this part repeats each time it's reached. Click to stop it looping." : "Loop: repeat this part each time it's reached, until you click again",
       item.loop, () => toggleLoop(index));
     const next = iconButton("next", `Play ${item.name} next`,
-      queued ? "Up next: plays when the section playing finishes. Click to cancel." : "Up next: play this section when the one playing finishes",
-      queued, () => queueSection(index));
+      queued ? "Up next: plays when the block playing finishes. Click to cancel." : "Up next: play this part when the block playing finishes, from its next block in the arranger",
+      queued, () => queuePart(index));
     next.disabled = !playback.on;
     const progress = document.createElement("div");
     progress.className = "progress";
@@ -445,65 +480,378 @@ function render() {
   table.replaceChildren(...rows);
   $("warnings").replaceChildren(...warned.map((entry) => Object.assign(document.createElement("li"), { textContent: entry.text })));
   $("warnings").hidden = !warned.length;
-  renderTimeline();
+  renderArranger();
   renderPlaying();
   renderAssets();
   renderSongs();
 }
 
-/* ---------- Timeline ---------- */
+/* ---------- Tabs ---------- */
 
-// Each section as a block as wide as its bars. Drag one to move it, or click it to go to it.
-let dragging = null;
-
-function moveSectionTo(from, to) {
-  if (from === to) return;
-  change((target) => {
-    const [item] = target.sections.splice(from, 1);
-    target.sections.splice(to, 0, item);
-  });
+function showTab(tab) {
+  prefs.tab = tab;
+  savePrefs();
+  render();
+  if (tab === "arranger") requestAnimationFrame(() => scrollToPlaying());
 }
 
-function renderTimeline() {
-  const queued = playback.queued?.index;
-  $("timeline").replaceChildren(...song.sections.map((item, index) => {
-    const block = document.createElement("button");
-    block.type = "button";
-    block.className = "block";
-    block.style.flexGrow = String(item.bars);
-    block.dataset.section = String(index);
-    block.draggable = true;
+function renderTabs() {
+  const arranger = prefs.tab === "arranger";
+  $("tab-parts").setAttribute("aria-selected", String(!arranger));
+  $("tab-arranger").setAttribute("aria-selected", String(arranger));
+  $("view-parts").hidden = arranger;
+  $("view-arranger").hidden = !arranger;
+  document.querySelectorAll(".parts-only").forEach((item) => { item.hidden = arranger; });
+}
+
+/* ---------- Arranger ---------- */
+
+// Each part's colour, by its colour number. Dark text reads on all of them.
+const PART_COLOURS = ["#e5675d", "#ec9a3f", "#d9c143", "#74bf5b", "#3db6a4", "#4fa0e2", "#8284ea", "#b673e0", "#e273b0", "#a8957f"];
+const partColour = (item) => PART_COLOURS[(item?.colour ?? 0) % PART_COLOURS.length];
+// Pixels a bar is wide, at each zoom.
+const ZOOMS = [4, 6, 10, 16, 24, 36, 56, 80, 120];
+const partById = (id) => song.sections.find((item) => item.id === id);
+
+// Minutes and seconds.
+function clock(seconds) {
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+// When each bar of the arrangement starts, in seconds, with each part's tempo.
+function barTimes() {
+  const times = [0];
+  for (const item of Song.expand(song).sections) {
+    const each = (4 * 60) / (item.bpm ?? song.bpm);
+    for (let bar = 0; bar < item.bars; bar += 1) times.push(times[times.length - 1] + each);
+  }
+  return times;
+}
+
+function setZoom(zoom, anchor = null) {
+  const scroll = $("arranger-scroll");
+  // Keeps the bar in the middle, or under the pointer, where it is.
+  const x = anchor ?? scroll.clientWidth / 2;
+  const bar = (scroll.scrollLeft + x - 8) / prefs.zoom;
+  prefs.zoom = zoom;
+  savePrefs();
+  renderArranger();
+  scroll.scrollLeft = bar * zoom + 8 - x;
+}
+
+function zoomBy(steps, anchor) {
+  const index = ZOOMS.indexOf(prefs.zoom);
+  const next = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, index + steps))];
+  if (next !== prefs.zoom) setZoom(next, anchor);
+}
+
+// The largest zoom that shows the whole song.
+function zoomToFit() {
+  const width = $("arranger-scroll").clientWidth - 24;
+  const bars = Math.max(1, Song.totalBars(song));
+  setZoom([...ZOOMS].reverse().find((zoom) => zoom * bars <= width) || ZOOMS[0]);
+  $("arranger-scroll").scrollLeft = 0;
+}
+
+function renderArranger() {
+  const zoom = prefs.zoom;
+  const played = Song.expand(song).sections;
+  const bars = Song.totalBars(song);
+  const times = barTimes();
+  // Room after the last block to drop one at the end.
+  const width = Math.max(bars + 8, 16) * zoom + 16;
+  $("arranger").style.width = `${width}px`;
+  $("zoom-out").disabled = prefs.zoom === ZOOMS[0];
+  $("zoom-in").disabled = prefs.zoom === ZOOMS[ZOOMS.length - 1];
+
+  // The parts, to add.
+  $("part-chips").replaceChildren(...song.sections.map((item) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.style.setProperty("--part", partColour(item));
+    chip.dataset.part = item.id;
+    chip.title = `${item.name}, ${item.bars} bar${item.bars === 1 ? "" : "s"}. Click to add it at the end, or drag it to where it should go.`;
+    chip.append(Object.assign(document.createElement("span"), { textContent: item.name }), Object.assign(document.createElement("small"), { textContent: String(item.bars) }));
+    chip.onpointerdown = (event) => startDrag(event, { part: item.id, from: chip });
+    return chip;
+  }));
+
+  // Bar numbers, every few bars as the zoom allows, with the time each starts.
+  const every = [1, 2, 4, 8, 16, 32, 64].find((count) => count * zoom >= 44) || 64;
+  const marks = [];
+  for (let bar = 0; bar <= bars + 8; bar += 1) {
+    if (bar % every && zoom < 10) continue;
+    const mark = document.createElement("span");
+    mark.className = bar % every ? "tick" : "tick major";
+    mark.style.left = `${8 + bar * zoom}px`;
+    if (!(bar % every)) {
+      mark.append(Object.assign(document.createElement("b"), { textContent: String(bar + 1) }));
+      if (bar <= bars) mark.append(Object.assign(document.createElement("small"), { textContent: clock(times[bar]) }));
+    }
+    marks.push(mark);
+  }
+  $("ruler").replaceChildren(...marks);
+
+  // The blocks.
+  let start = 0;
+  $("lane").replaceChildren(...played.map((item, index) => {
+    const block = document.createElement("div");
+    block.className = "arr-block";
+    block.tabIndex = 0;
+    block.dataset.block = item.id;
+    block.dataset.index = String(index);
+    block.style.left = `${8 + start * zoom}px`;
+    block.style.width = `${Math.max(3, item.bars * zoom - 2)}px`;
+    block.style.setProperty("--part", partColour(item));
+    block.classList.toggle("selected", item.id === selected);
     block.classList.toggle("looping", item.loop);
-    block.classList.toggle("queued", queued === index);
-    block.title = `${item.name}: ${item.bars} bar${item.bars === 1 ? "" : "s"}${item.loop ? ", looping" : ""}. Drag to move it. Click to go to it.`;
+    block.classList.toggle("narrow", item.bars * zoom < 36);
+    block.classList.toggle("queued", playback.on && playback.queued?.id === item.id);
+    block.setAttribute("role", "button");
+    block.setAttribute("aria-label", `${item.name}, ${item.bars} bars, from bar ${start + 1}`);
+    block.title = `${item.name}: bars ${start + 1} to ${start + item.bars}${item.loop ? ", looping" : ""}. Drag to move it, Alt-drag to copy it, double-click to edit the part.`;
     block.append(Object.assign(document.createElement("span"), { className: "block-fill" }),
       Object.assign(document.createElement("span"), { className: "block-name", textContent: item.name }),
-      Object.assign(document.createElement("small"), { textContent: `${item.bars}${item.loop ? " \u221e" : ""}` }));
-    block.onclick = () => {
-      const cell = document.querySelector(`#table td[data-section="${index}"] input`);
-      cell?.scrollIntoView({ block: "nearest", inline: "center" });
-      cell?.focus();
-    };
-    block.ondragstart = (event) => {
-      dragging = index;
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", String(index));
-    };
-    block.ondragover = (event) => {
-      if (dragging === null) return;
-      event.preventDefault();
-      block.classList.add("drop");
-    };
-    block.ondragleave = () => block.classList.remove("drop");
-    block.ondrop = (event) => {
-      event.preventDefault();
-      const from = dragging;
-      dragging = null;
-      if (from !== null) moveSectionTo(from, index);
-    };
-    block.ondragend = () => { dragging = null; };
+      Object.assign(document.createElement("small"), { textContent: `${item.bars}${item.loop ? " ∞" : ""}` }));
+    block.onpointerdown = (event) => startDrag(event, { block: item.id, from: block });
+    block.ondblclick = () => editPart(item.part);
+    block.onfocus = () => { if (selected !== item.id) select(item.id); };
+    start += item.bars;
     return block;
   }));
+  if (!played.length) {
+    $("lane").append(Object.assign(document.createElement("p"), { className: "lane-empty muted", textContent: "Nothing to play yet. Click a part above, or drag it here." }));
+  }
+  const picked = selected !== null && song.order.some((item) => item.id === selected);
+  if (!picked) selected = null;
+  $("block-copy").disabled = !picked;
+  $("block-delete").disabled = !picked;
+  $("block-next").disabled = !picked || !playback.on;
+  renderUpcoming(true);
+}
+
+function select(id) {
+  selected = id;
+  document.querySelectorAll("#lane .arr-block").forEach((block) => block.classList.toggle("selected", block.dataset.block === id));
+  $("block-copy").disabled = id === null;
+  $("block-delete").disabled = id === null;
+  $("block-next").disabled = id === null || !playback.on;
+  renderUpcoming(true);
+}
+
+// Goes to a part's column in Parts.
+function editPart(partId) {
+  const index = song.sections.findIndex((item) => item.id === partId);
+  if (index < 0) return;
+  showTab("parts");
+  const input = document.querySelector(`#table td[data-section="${index}"] input`);
+  input?.scrollIntoView({ block: "nearest", inline: "center" });
+  input?.focus();
+}
+
+function addBlock(partId, at = song.order.length) {
+  if (song.order.length >= Song.MAX_BLOCKS) {
+    setStatus(`The arranger holds up to ${Song.MAX_BLOCKS} blocks.`, true);
+    return;
+  }
+  const item = Song.block(partId);
+  change((target) => target.order.splice(at, 0, item));
+  select(item.id);
+  setStatus(`Added "${partById(partId)?.name}" at bar ${Song.bounds(song)[at].start + 1}.`);
+}
+
+function duplicateBlock(id = selected) {
+  const index = song.order.findIndex((item) => item.id === id);
+  if (index >= 0) addBlock(song.order[index].part, index + 1);
+}
+
+function deleteBlock(id = selected) {
+  const index = song.order.findIndex((item) => item.id === id);
+  if (index < 0) return;
+  const name = partById(song.order[index].part)?.name;
+  change((target) => target.order.splice(index, 1));
+  const near = song.order[Math.min(index, song.order.length - 1)];
+  select(near ? near.id : null);
+  setStatus(`Removed a "${name}" block. The part is still in Parts.`);
+}
+
+// Moves or copies a block to a place in the arranger, counted in blocks.
+function placeBlock(id, at, copy) {
+  const from = song.order.findIndex((item) => item.id === id);
+  if (from < 0) return;
+  if (copy) {
+    addBlock(song.order[from].part, at);
+    return;
+  }
+  const to = at > from ? at - 1 : at;
+  if (to === from) return;
+  change((target) => {
+    const [item] = target.order.splice(from, 1);
+    target.order.splice(to, 0, item);
+  });
+  select(id);
+}
+
+/* Dragging, with the pointer: a block to move it (or copy it, with Alt), or a part from
+   the row above to add it. While dragging, a line shows where it will go. A press that
+   doesn't move is a click: it picks the block, or adds the part at the end. */
+let drag = null;
+
+function startDrag(event, source) {
+  if (event.button !== 0) return;
+  drag = { ...source, x: event.clientX, y: event.clientY, moved: false, at: null, ghost: null };
+  source.from.setPointerCapture(event.pointerId);
+  source.from.onpointermove = moveDrag;
+  source.from.onpointerup = endDrag;
+  source.from.onpointercancel = cancelDrag;
+}
+
+// Where a drop at a point would go, in blocks, and where its line goes, in pixels.
+function dropAt(clientX) {
+  const box = $("lane").getBoundingClientRect();
+  const bar = (clientX - box.left - 8) / prefs.zoom;
+  const ranges = Song.bounds(song);
+  let at = ranges.findIndex((range) => bar < (range.start + range.end) / 2);
+  if (at < 0) at = ranges.length;
+  const x = 8 + (at < ranges.length ? ranges[at].start : Song.totalBars(song)) * prefs.zoom;
+  return { at, x };
+}
+
+function moveDrag(event) {
+  if (!drag) return;
+  if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) return;
+  if (!drag.moved) {
+    drag.moved = true;
+    drag.ghost = drag.from.cloneNode(true);
+    drag.ghost.className = `${drag.from.className} drag-ghost`;
+    drag.ghost.style.width = `${drag.from.offsetWidth}px`;
+    document.body.append(drag.ghost);
+    drag.from.classList.add("dragging");
+  }
+  drag.ghost.style.left = `${event.clientX + 6}px`;
+  drag.ghost.style.top = `${event.clientY + 6}px`;
+  const lane = $("arranger-scroll").getBoundingClientRect();
+  const over = event.clientY >= lane.top - 30 && event.clientY <= lane.bottom + 30;
+  // Scrolls along when dragged near an edge.
+  if (over && event.clientX > lane.right - 30) $("arranger-scroll").scrollLeft += 12;
+  if (over && event.clientX < lane.left + 30) $("arranger-scroll").scrollLeft -= 12;
+  drag.at = over ? dropAt(event.clientX).at : null;
+  $("drop-mark").hidden = !over;
+  if (over) $("drop-mark").style.left = `${dropAt(event.clientX).x - 1}px`;
+  drag.ghost.classList.toggle("copying", Boolean(drag.part || event.altKey));
+  drag.copy = event.altKey;
+}
+
+function endDrag(event) {
+  const was = drag;
+  cancelDrag();
+  if (!was) return;
+  if (!was.moved) {
+    if (was.part) addBlock(was.part);
+    else select(was.block);
+    return;
+  }
+  if (was.at === null) return;
+  if (was.part) addBlock(was.part, was.at);
+  else placeBlock(was.block, was.at, event.altKey || was.copy);
+}
+
+function cancelDrag() {
+  if (!drag) return;
+  drag.ghost?.remove();
+  drag.from.classList.remove("dragging");
+  drag.from.onpointermove = null;
+  drag.from.onpointerup = null;
+  drag.from.onpointercancel = null;
+  drag = null;
+  $("drop-mark").hidden = true;
+}
+
+// Brings the block playing, or else the one picked, into view.
+function scrollToPlaying() {
+  const block = document.querySelector("#lane .arr-block.playing") || document.querySelector("#lane .arr-block.selected");
+  block?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+/* What's playing, and what's coming up: a column for each block, with what each grid
+   plays in it. Before Play, it shows how the song starts, or from the block picked. */
+
+// A pattern's name, as the part menus show it.
+function patternName(instrument, ref) {
+  if (ref === null || ref === undefined) return "Off";
+  if (instrument.library) return ref === Song.GRID ? "Grid pattern" : (td3Library().find((entry) => entry.id === ref)?.name || "(not in the library)");
+  const kept = song.assets[instrument.name]?.patterns.find((entry) => entry.ref === ref);
+  return kept ? kept.label : `${instrument.word || "Pattern"} ${ref + 1}`;
+}
+
+// The blocks to show: the one playing and the next two, as the song will go.
+function upcomingBlocks() {
+  if (!playback.on) {
+    const played = Song.expand(song).sections;
+    const from = Math.max(0, played.findIndex((item) => item.id === selected));
+    return { title: selected ? "From the block picked" : "How it starts", items: played.slice(from, from + 3).map((item, offset) => ({ item, label: offset ? "Then" : "First" })) };
+  }
+  const target = playback.played;
+  const at = Song.sectionAt(target, playback.sim.bar);
+  if (!at) return { title: "Playing", items: [] };
+  const items = [{ item: target.sections[at.index], label: `Now, bar ${at.bar + 1} of ${target.sections[at.index].bars}` }];
+  // Follows the song ahead, with its loops and what's queued, to the next blocks that start.
+  const look = JSON.parse(JSON.stringify(playback.sim));
+  for (let step = 0; step < 4096 && items.length < 3; step += 1) {
+    if (!Sync.songNextBar(look)) {
+      items.push({ item: null, label: "End" });
+      break;
+    }
+    const index = playback.starts.get(look.bar);
+    if (index !== undefined) items.push({ item: target.sections[index], label: items.length === 1 ? (playback.queued ? "Up next" : "Next") : "Then" });
+  }
+  return { title: "Playing", items };
+}
+
+let upcomingKey = "";
+
+function renderUpcoming(force = false) {
+  const { title, items } = upcomingBlocks();
+  const key = JSON.stringify([title, items.map((entry) => [entry.item?.id, entry.label]), effectiveMutes(), peers]);
+  if (!force && key === upcomingKey) return;
+  upcomingKey = key;
+  $("upcoming-title").textContent = title;
+  const head = document.createElement("tr");
+  head.append(document.createElement("th"));
+  for (const { item, label } of items) {
+    const cell = document.createElement("th");
+    cell.className = "upcoming-head";
+    if (item) cell.style.setProperty("--part", partColour(item));
+    cell.append(Object.assign(document.createElement("small"), { textContent: label }),
+      Object.assign(document.createElement("span"), { textContent: item ? `${item.name}${item.loop ? " ∞" : ""}` : "The song ends" }));
+    head.append(cell);
+  }
+  const rows = [head];
+  const mutes = effectiveMutes();
+  for (const instrument of Song.INSTRUMENTS) {
+    const row = document.createElement("tr");
+    row.classList.toggle("closed", !peers.includes(instrument.name));
+    row.classList.toggle("silenced", mutes.includes(instrument.name));
+    row.append(Object.assign(document.createElement("th"), { textContent: instrument.label }));
+    for (const { item } of items) {
+      const cell = document.createElement("td");
+      if (item) {
+        const ref = item.patterns[instrument.name];
+        cell.append(Object.assign(document.createElement("span"), { textContent: patternName(instrument, ref) }));
+        cell.classList.toggle("off", ref === null);
+        if (item.bars > 1 && instrument.name in item.fills) {
+          cell.append(Object.assign(document.createElement("small"), { textContent: `Fill: ${patternName(instrument, item.fills[instrument.name])}` }));
+        }
+      }
+      row.append(cell);
+    }
+    rows.push(row);
+  }
+  if (!items.length) rows.push(Object.assign(document.createElement("tr"), { innerHTML: '<td class="muted">Nothing in the arranger yet.</td>' }));
+  $("upcoming").replaceChildren(...rows);
+  $("upcoming").classList.toggle("on", playback.on);
 }
 
 /* ---------- Playing ---------- */
@@ -528,8 +876,8 @@ function renderPlaying() {
     const target = playback.played;
     const total = Song.totalBars(target);
     const at = Song.sectionAt(target, playback.sim.bar);
-    current = at ? at.index : null;
     if (at) {
+      current = song.sections.findIndex((item) => item.id === target.sections[at.index].part);
       text = `Bar ${playback.sim.bar + 1} of ${total}: ${target.sections[at.index].name}, bar ${at.bar + 1}`;
       if (target.sections[at.index].loop) text += ", looping";
       if (playback.queued) text += `. Next: ${target.sections[playback.queued.index].name}`;
@@ -537,33 +885,40 @@ function renderPlaying() {
   }
   $("position").textContent = text;
   document.querySelectorAll("#table td").forEach((cell) => {
-    cell.classList.toggle("playing", current !== null && Number(cell.dataset.section) === current);
+    cell.classList.toggle("playing", current !== null && current >= 0 && Number(cell.dataset.section) === current);
   });
   renderProgress();
+  if (prefs.tab === "arranger") renderUpcoming();
 }
 
 // Fills the bar under the section playing, as far through it as the song is.
 function renderProgress() {
-  let index = null;
+  let playing = null;
   let done = 0;
   let text = "";
+  let bar = 0;
   if (playback.on) {
     const at = Song.sectionAt(playback.played, playback.sim.bar);
     if (at) {
-      index = at.index;
-      const bars = playback.played.sections[at.index].bars;
+      playing = playback.played.sections[at.index];
+      const { bars } = playing;
       const inBar = (pulseAt(performance.now()) % BAR_PULSES) / BAR_PULSES;
       done = Math.min(1, (at.bar + Math.max(0, inBar)) / bars);
       text = `${at.bar + 1}/${bars}`;
+      bar = playback.sim.bar + Math.max(0, inBar);
     }
   }
-  document.querySelectorAll("#timeline .block").forEach((block) => {
-    const here = index !== null && Number(block.dataset.section) === index;
+  // The playhead, where the arranger has the same blocks as the song playing.
+  const same = playing && JSON.stringify(song.order.map((item) => item.id)) === JSON.stringify(playback.played.sections.map((item) => item.id));
+  $("playhead").hidden = !same;
+  if (same) $("playhead").style.left = `${8 + bar * prefs.zoom}px`;
+  document.querySelectorAll("#lane .arr-block").forEach((block) => {
+    const here = playing !== null && block.dataset.block === playing.id;
     block.classList.toggle("playing", here);
     block.querySelector(".block-fill").style.width = `${here ? done * 100 : 0}%`;
   });
   document.querySelectorAll(".section-play").forEach((cell) => {
-    const here = index !== null && Number(cell.dataset.section) === index;
+    const here = playing !== null && cell.dataset.part === playing.part;
     cell.querySelector(".fill").style.width = `${here ? done * 100 : 0}%`;
     cell.querySelector(".progress").setAttribute("aria-valuenow", String(here ? Math.round(done * 100) : 0));
     cell.querySelector(".progress-label").textContent = here ? text : "";
@@ -657,9 +1012,9 @@ function toggleLoop(index) {
   const item = song.sections[index];
   change(() => { item.loop = !item.loop; });
   if (!playback.on) return;
-  const played = playback.played.sections.find((section) => section.id === item.id);
-  if (!played) return;
-  played.loop = item.loop;
+  const played = playback.played.sections.filter((section) => section.part === item.id);
+  if (!played.length) return;
+  for (const section of played) section.loop = item.loop;
   sendMove({ atBar: nextSafeBar(), loops: Song.loops(playback.played) });
   setStatus(item.loop ? `"${item.name}" loops until you click its loop button again.` : `"${item.name}" stops looping, and the song carries on after it.`);
   renderPlaying();
@@ -698,9 +1053,42 @@ function queueSection(index) {
   if (playback.queued) queueSection(playback.queued.index);
   const { playing, atBar } = runEnd();
   sendMove({ atBar, toBar: sectionBounds(target, index).start });
-  playback.queued = { index, atBar, move: playback.sim.moves[playback.sim.moves.length - 1] };
+  const { id, part } = target.sections[index];
+  playback.queued = { index, id, part, atBar, move: playback.sim.moves[playback.sim.moves.length - 1] };
   render();
   setStatus(`Up next: "${target.sections[index].name}", when "${target.sections[playing.index].name}" finishes.`);
+}
+
+// Queues a part from Parts: its next block in the arranger after the one playing.
+function queuePart(index) {
+  if (!playback.on) return;
+  const item = song.sections[index];
+  const target = playback.played;
+  if (playback.queued?.part === item.id) {
+    queueSection(playback.queued.index);
+    return;
+  }
+  const at = Song.sectionAt(target, playback.sim.bar)?.index ?? 0;
+  const count = target.sections.length;
+  for (let step = 1; step <= count; step += 1) {
+    const look = (at + step) % count;
+    if (target.sections[look].part === item.id) {
+      queueSection(look);
+      return;
+    }
+  }
+  setStatus(`"${item.name}" isn't in the arranger${song.order.some((entry) => entry.part === item.id) ? " that's playing. It plays from the next Play" : ". Add it there first"}.`, true);
+}
+
+// Queues the block picked in the arranger.
+function queueSelected() {
+  if (!playback.on || !selected) return;
+  const index = playback.played.sections.findIndex((item) => item.id === selected);
+  if (index < 0) {
+    setStatus("That block was added after Play was pressed, so it plays from the next Play.", true);
+    return;
+  }
+  queueSection(index);
 }
 
 /* ---------- Count-in ---------- */
@@ -731,6 +1119,12 @@ function countIn(at, bpm) {
 }
 
 function startPlaying() {
+  if (!song.order.length) {
+    setStatus("There's nothing in the arranger to play. Add parts to it first.", true);
+    setPlaying = null;
+    renderSetList();
+    return;
+  }
   if (!peers.some((name) => Song.INSTRUMENTS.some((item) => item.name === name))) {
     setStatus("Open the grids in this browser, with Sync ticked, to play the song.", true);
     setPlaying = null;
@@ -748,13 +1142,14 @@ function startPlaying() {
   }
   if (wait) countIn(at, bpm);
   // Where each section starts, and its tempo when sections have their own.
-  const bounds = Song.bounds(song);
+  const played = Song.expand(JSON.parse(JSON.stringify(song)));
+  const bounds = Song.bounds(played);
   const starts = new Map(bounds.map((range, index) => [range.start, index]));
-  const tempos = new Map(song.sections.some((item) => item.bpm !== null)
-    ? bounds.map((range, index) => [range.start, song.sections[index].bpm ?? song.bpm]) : []);
+  const tempos = new Map(played.sections.some((item) => item.bpm !== null)
+    ? bounds.map((range, index) => [range.start, played.sections[index].bpm ?? song.bpm]) : []);
   Object.assign(playback, {
     on: true, anchorTime: at, anchorPulse: 0, bpm, queued: null, starts, tempos,
-    played: JSON.parse(JSON.stringify(song)), sim: Sync.songStart({ bars: plan.bars, loop: plan.loop, loops: plan.loops }),
+    played, sim: Sync.songStart({ bars: plan.bars, loop: plan.loop, loops: plan.loops }),
   });
   if (take.on) take.sections = [0];
   clearInterval(playback.timer);
@@ -812,7 +1207,7 @@ function saveTake() {
   songs.unshift({ id: newId(), song: kept, saved: new Date().toISOString() });
   writeJson(SONGS_KEY, songs);
   renderSongs();
-  return `Saved the take as "${kept.name}" in Saved songs, with ${kept.sections.length} section${kept.sections.length === 1 ? "" : "s"}.`;
+  return `Saved the take as "${kept.name}" in Saved songs, with ${kept.order.length} block${kept.order.length === 1 ? "" : "s"}.`;
 }
 
 function toggleTake() {
@@ -1009,7 +1404,7 @@ async function addFiles(name) {
   if (patterns.length) change(() => { result = Song.addAssets(song, name, { patterns }); });
   renderAssets();
   const parts = [];
-  if (result.added) parts.push(`Added ${result.added} ${labelOf(name)} pattern${result.added === 1 ? "" : "s"} to the song's assets. Choose ${result.added === 1 ? "it" : "them"} in the sections.`);
+  if (result.added) parts.push(`Added ${result.added} ${labelOf(name)} pattern${result.added === 1 ? "" : "s"} to the song's assets. Choose ${result.added === 1 ? "it" : "them"} in the parts.`);
   if (result.full) parts.push(`${result.full} didn't fit, as all ${Song.PATTERNS} pattern numbers hold one. Remove some from the assets first.`);
   if (skipped.length) parts.push(`${skipped.join(", ")} ${skipped.length === 1 ? "isn't a pattern" : "aren't patterns"} ${labelOf(name)} can read.`);
   setStatus(parts.join(" ") || "Nothing was added.", !result.added);
@@ -1179,7 +1574,7 @@ function renderAssets() {
     if (collecting?.asked.has(instrument.name) && !collecting.answered.has(instrument.name)) note.textContent = "Collecting...";
     else if (waiting) note.textContent = "Putting back...";
     else if (kept) note.textContent = `Collected ${shortDate(kept.collected)}: ${kept.patterns.length} pattern${kept.patterns.length === 1 ? "" : "s"}${kept.sound ? ", sound" : ""}`;
-    else note.textContent = peers.includes(instrument.name) ? "Nothing kept yet" : `Tick Sync in ${instrument.name} to add`;
+    else note.textContent = peers.includes(instrument.name) ? "Nothing kept yet" : "Not linked";
     const open = peers.includes(instrument.name);
     // Add stays clickable when the grid isn't linked, to say what to do.
     const button = toolButton("Add", open ? `Pick patterns${instrument.library || instrument.word ? "" : " and a sound"} from ${instrument.name} and its library to keep with this song` : `Open ${instrument.name}, with Sync ticked, to pick from it`,
@@ -1496,6 +1891,25 @@ function bind() {
   $("section-back").onclick = () => skipSection(-1);
   $("section-next").onclick = () => skipSection(1);
   $("add-section").onclick = () => copySection(song.sections.length - 1);
+  $("tab-parts").onclick = () => showTab("parts");
+  $("tab-arranger").onclick = () => showTab("arranger");
+  $("block-copy").onclick = () => duplicateBlock();
+  $("block-delete").onclick = () => deleteBlock();
+  $("block-next").onclick = queueSelected;
+  $("zoom-in").onclick = () => zoomBy(1);
+  $("zoom-out").onclick = () => zoomBy(-1);
+  $("zoom-fit").onclick = zoomToFit;
+  // Pinch, or Ctrl or Cmd with the wheel, zooms where the pointer is.
+  $("arranger-scroll").addEventListener("wheel", (event) => {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    event.preventDefault();
+    const now = performance.now();
+    if (now - (zoomBy.last || 0) < 120) return;
+    zoomBy.last = now;
+    zoomBy(event.deltaY < 0 ? 1 : -1, event.clientX - $("arranger-scroll").getBoundingClientRect().left);
+  }, { passive: false });
+  // Clicking an empty part of the lane lets go of the block picked.
+  $("lane").addEventListener("pointerdown", (event) => { if (event.target === $("lane")) select(null); });
   $("collect-all").onclick = () => collect(Song.INSTRUMENTS.map((item) => item.name));
   $("load-all").onclick = () => loadInto(Song.INSTRUMENTS.map((item) => item.name));
   $("picker-close").onclick = closePicker;
@@ -1535,13 +1949,35 @@ function bind() {
       togglePlay();
     } else if (event.key === "?") {
       $("help").showModal();
+    } else if (event.key === "Tab" && !event.shiftKey && event.target === document.body) {
+      event.preventDefault();
+      showTab(prefs.tab === "parts" ? "arranger" : "parts");
+    } else if (prefs.tab === "arranger" && (event.key === "Delete" || event.key === "Backspace") && selected) {
+      event.preventDefault();
+      deleteBlock();
+    } else if (prefs.tab === "arranger" && event.key.toLowerCase() === "d" && selected) {
+      duplicateBlock();
+    } else if (prefs.tab === "arranger" && (event.key === "+" || event.key === "=")) {
+      zoomBy(1);
+    } else if (prefs.tab === "arranger" && event.key === "-") {
+      zoomBy(-1);
+    } else if (prefs.tab === "arranger" && event.key === "0") {
+      zoomToFit();
+    } else if (prefs.tab === "arranger" && !playback.on && selected && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+      // Picks the block before or after.
+      const index = song.order.findIndex((item) => item.id === selected);
+      const next = song.order[index + (event.key === "ArrowLeft" ? -1 : 1)];
+      if (next) {
+        select(next.id);
+        document.querySelector(`#lane [data-block="${next.id}"]`)?.focus();
+      }
     } else if (/^[1-9]$/.test(event.key) && playback.on) {
-      // Up next by number, as the sections are counted left to right.
+      // Up next by number, as the blocks are counted left to right.
       const index = Number(event.key) - 1;
       if (index < playback.played.sections.length) queueSection(index);
     } else if (event.key.toLowerCase() === "l" && playback.on) {
       const at = Song.sectionAt(playback.played, playback.sim.bar);
-      const index = at ? song.sections.findIndex((item) => item.id === playback.played.sections[at.index].id) : -1;
+      const index = at ? song.sections.findIndex((item) => item.id === playback.played.sections[at.index].part) : -1;
       if (index >= 0) toggleLoop(index);
     } else if (event.key === "ArrowLeft" && playback.on) {
       skipSection(-1);
@@ -1559,4 +1995,4 @@ setTheme(document.documentElement.dataset.theme === "light");
 bind();
 render();
 renderSetList();
-setStatus("Open the grids in this browser with Sync ticked, choose a pattern for each section, then press Play.");
+setStatus("Open the grids in this browser with Sync ticked, choose what each grid plays in each part, put the parts in order in the Arranger, then press Play.");

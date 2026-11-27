@@ -222,16 +222,67 @@ header.bar { gap: 6px 10px; }
 .extra-cell .fill-select, .extra-cell .preset-input { width: 100%; height: 26px; font-size: 12px; }
 .warnings { margin: 8px 0 0; padding-left: 18px; color: var(--error); font-size: 12px; }
 .warnings li { margin: 2px 0; }
-/* The timeline: each section as wide as its bars. */
-.timeline { display: flex; gap: 3px; margin-bottom: 10px; overflow: hidden; }
-.timeline .block { position: relative; display: flex; flex-basis: 0; align-items: center; gap: 4px; min-width: 28px; height: 30px; padding: 0 6px; overflow: hidden; text-align: left; cursor: grab; }
-.timeline .block-fill { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(var(--on), 0.22); pointer-events: none; }
-.timeline .block-name { position: relative; flex: 1; min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.timeline .block small { position: relative; color: var(--muted); font-size: 10px; }
-.timeline .block.playing { border-color: var(--accent); }
-.timeline .block.looping small { color: var(--accent); }
-.timeline .block.queued { outline: 2px dashed var(--accent); outline-offset: -2px; }
-.timeline .block.drop { border-color: var(--accent); background: rgba(var(--on), 0.12); }
+/* Parts and Arranger, as tabs. */
+.tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tabs [role="tab"] { border: 0; border-radius: 0; background: transparent; padding: 6px 14px; font-weight: 600; color: var(--muted); }
+.tabs [role="tab"] + [role="tab"] { border-left: 1px solid var(--line); }
+.tabs [role="tab"][aria-selected="true"] { background: var(--accent); color: var(--accent-text); }
+.name-cell { display: flex; align-items: center; gap: 4px; }
+.name-cell input { flex: 1; min-width: 0; }
+.swatch { flex: none; width: 14px; height: 14px; min-width: 0; padding: 0; border: 1px solid rgba(0, 0, 0, 0.35); border-radius: 50%; background: var(--part); cursor: pointer; }
+.song-table td.unused input { color: var(--faint); font-style: italic; }
+
+/* The arranger: the parts to add, then a lane of blocks under a ruler of bars. */
+.arranger-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.part-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 0; border-radius: 6px; background: var(--part); color: #16161a; font-weight: 600; cursor: grab; touch-action: none; }
+.chip small { font-weight: 400; opacity: 0.7; }
+.chip:hover { filter: brightness(1.08); }
+.button-pair { display: inline-flex; }
+.button-pair > button { border-radius: 0; }
+.button-pair > button:first-child { border-radius: 6px 0 0 6px; }
+.button-pair > button:last-child { border-radius: 0 6px 6px 0; }
+.button-pair > button + button { margin-left: -1px; }
+.zoom button { min-width: 34px; }
+.arranger-scroll { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.arranger { position: relative; height: 104px; min-width: 100%; }
+.ruler { position: absolute; inset: 0 0 auto 0; height: 34px; border-bottom: 1px solid var(--line); }
+.ruler .tick { position: absolute; top: 24px; bottom: 0; width: 1px; background: var(--line); }
+.ruler .tick.major { top: 0; background: var(--faint); }
+.ruler .tick b { position: absolute; top: 1px; left: 4px; color: var(--text); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.ruler .tick small { position: absolute; top: 15px; left: 4px; color: var(--faint); font-size: 10px; white-space: nowrap; }
+.lane { position: absolute; inset: 42px 0 8px 0; }
+.lane-empty { position: absolute; left: 12px; top: 14px; margin: 0; }
+.arr-block { position: absolute; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 0 8px; overflow: hidden;
+  border-radius: 6px; background: var(--part); color: #16161a; cursor: grab; touch-action: none; user-select: none; outline: none; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); }
+.arr-block .block-name { position: relative; overflow: hidden; font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.arr-block small { position: relative; font-size: 11px; opacity: 0.75; white-space: nowrap; }
+.arr-block .block-fill { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(255, 255, 255, 0.35); pointer-events: none; }
+.arr-block.narrow { padding: 0 3px; }
+.arr-block.narrow small { display: none; }
+.arr-block.selected { box-shadow: inset 0 0 0 2px #16161a, 0 0 0 2px var(--text); }
+.arr-block:focus-visible { box-shadow: inset 0 0 0 2px #16161a, 0 0 0 3px var(--accent); }
+.arr-block.playing { box-shadow: inset 0 0 0 2px #16161a, 0 0 0 2px var(--accent); }
+.arr-block.queued { outline: 2px dashed var(--accent); outline-offset: 2px; }
+.arr-block.dragging { opacity: 0.35; }
+.drag-ghost { position: fixed !important; top: 0; height: 44px; z-index: 50; pointer-events: none; opacity: 0.85; bottom: auto !important; }
+.drag-ghost.copying::after { content: "+"; position: absolute; right: 4px; top: 2px; font-weight: 700; }
+.drop-mark { position: absolute; top: 36px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; }
+.playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); pointer-events: none; box-shadow: 0 0 0 1px var(--bg); }
+
+/* What's playing and what's next, under the arranger. */
+.upcoming-wrap { margin-top: 12px; }
+.upcoming-wrap h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.upcoming { border-collapse: separate; border-spacing: 4px; }
+.upcoming th { padding: 0 8px 0 0; color: var(--text); font-size: 13px; font-weight: 600; text-align: right; white-space: nowrap; }
+.upcoming th.upcoming-head { min-width: 150px; padding: 6px 10px; border-radius: 6px; background: var(--part, var(--panel-2)); color: #16161a; text-align: left; }
+.upcoming th.upcoming-head small { display: block; font-size: 11px; font-weight: 400; opacity: 0.75; }
+.upcoming td { min-width: 150px; padding: 6px 10px; border-radius: 6px; background: var(--cell); font-size: 13px; vertical-align: top; }
+.upcoming td small { display: block; color: var(--muted); font-size: 11px; }
+.upcoming td.off { color: var(--faint); }
+.upcoming.on td:nth-child(2) { box-shadow: inset 0 0 0 2px var(--accent); }
+.upcoming tr.closed th { color: var(--faint); }
+.upcoming tr.silenced td { opacity: 0.45; }
 /* Offering to load a song's assets. */
 .load-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--accent); border-radius: 8px; font-size: 12px; }
 .load-offer span { flex: 1 1 160px; }

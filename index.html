@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Song Grid</title>
-<link rel="stylesheet" href="style.css?v=202611240021">
+<link rel="stylesheet" href="style.css?v=202611261700">
 <script>
   // Set before the page draws, so it doesn't flash the other theme.
   try { if ((localStorage.getItem("midi-grids-theme") || localStorage.getItem("song-grid-theme")) === "light") document.documentElement.dataset.theme = "light"; } catch {}
@@ -22,19 +22,19 @@
     <input id="song-name" type="text" maxlength="40" placeholder="Untitled" spellcheck="false">
   </label>
   <button id="play" class="primary" type="button" title="Starts the open grids playing the song (Space)" data-icon="auto">Play</button>
-  <button id="record" class="record" type="button" aria-pressed="false" title="Records a take: every section that plays, with your jumps and loops, saved in order as a new song when it stops (R)" data-icon="auto">Rec</button>
+  <button id="record" class="record" type="button" aria-pressed="false" title="Records a take: every block that plays, with your jumps and loops, saved in order as a new song when it stops (R)" data-icon="auto">Rec</button>
   <label>BPM
     <input id="bpm" type="number" min="20" max="300" step="0.1" value="120">
   </label>
-  <label class="check" title="Starts the song again after its last section">
+  <label class="check" title="Starts the song again after its last block">
     <input id="loop" type="checkbox"> Loop
   </label>
   <label class="check" title="Clicks for a bar before the song starts">
     <input id="count-in" type="checkbox"> Count-in
   </label>
   <span class="divider" aria-hidden="true"></span>
-  <button id="section-back" type="button" title="Jump to the start of the section before, on the next bar" disabled>&#9664; Section</button>
-  <button id="section-next" type="button" title="Jump to the start of the next section, on the next bar" disabled>Section &#9654;</button>
+  <button id="section-back" type="button" title="Jump to the start of the block before, on the next bar" disabled>&#9664; Part</button>
+  <button id="section-next" type="button" title="Jump to the start of the next block, on the next bar" disabled>Part &#9654;</button>
   <span id="position" class="position" aria-live="off"></span>
   <div class="spacer"></div>
   <span id="peers" class="pill" role="status">Not linked</span>
@@ -55,21 +55,58 @@
 </header>
 
 <main class="main">
-  <section class="card arrangement" aria-labelledby="arrangement-title">
+  <section class="card arrangement" aria-label="Parts and arranger">
     <div class="card-head">
-      <h2 id="arrangement-title">Arrangement</h2>
+      <div class="tabs" role="tablist" aria-label="View">
+        <button id="tab-parts" role="tab" type="button" aria-selected="true" aria-controls="view-parts" title="Define the parts: each one's length, and what each grid plays in it">Parts</button>
+        <button id="tab-arranger" role="tab" type="button" aria-selected="false" aria-controls="view-arranger" title="Put the parts in the order they play (Tab)">Arranger</button>
+      </div>
       <span id="total" class="muted"></span>
       <div class="spacer"></div>
-      <button id="more-toggle" class="toggle" type="button" aria-pressed="false" title="Shows each section's tempo and transpose, and each grid's fill and preset. While a section uses them they stay shown.">Tempo, fills, presets</button>
+      <button id="more-toggle" class="toggle parts-only" type="button" aria-pressed="false" title="Shows each part's tempo and transpose, and each grid's fill and preset. While a part uses them they stay shown.">Tempo, fills, presets</button>
+      <button id="add-section" class="parts-only" type="button" title="Adds a part, a copy of the last one, and puts it at the end of the arranger" data-icon="new">Add part</button>
       <button id="export-midi" type="button" title="Downloads the arrangement as a MIDI file, a track for each grid, made from the patterns kept with the song">Export MIDI</button>
-      <button id="add-section" type="button" title="Adds a section at the end, a copy of the last one">Add section</button>
     </div>
-    <div id="timeline" class="timeline" aria-label="Sections, as wide as their bars. Drag one to move it."></div>
-    <div class="table-wrap">
-      <table id="table" class="song-table"></table>
+
+    <div id="view-parts" class="view" role="tabpanel" aria-labelledby="tab-parts">
+      <div class="table-wrap">
+        <table id="table" class="song-table"></table>
+      </div>
+      <ul id="warnings" class="warnings" hidden></ul>
+      <p class="muted hint">Each column is a part, such as an intro, verse or chorus. Choose its length in bars, and the pattern each grid plays in it, or Off. Every grid starts its pattern from the first step at the start of each part. The colour dot picks the colour of its blocks in the Arranger, where you put the parts in the order they play.</p>
     </div>
-    <ul id="warnings" class="warnings" hidden></ul>
-    <p class="muted hint">Each column is a section, played left to right. Choose its length in bars, and the pattern each grid plays in it, or Off. Every grid starts its pattern from the first step at the start of each section.</p>
+
+    <div id="view-arranger" class="view" role="tabpanel" aria-labelledby="tab-arranger" hidden>
+      <div class="arranger-bar">
+        <div id="part-chips" class="part-chips" role="group" aria-label="Parts. Click one to add it at the end, or drag it into the arranger."></div>
+        <div class="spacer"></div>
+        <div class="button-pair" role="group" aria-label="Selected block">
+          <button id="block-next" type="button" title="Plays the selected block when the one playing finishes" disabled>Play next</button>
+          <button id="block-copy" type="button" title="Adds a copy of the selected block after it (D)" data-icon="duplicate" disabled>Duplicate</button>
+          <button id="block-delete" type="button" title="Removes the selected block from the arranger (Delete). The part stays in Parts." data-icon="clear" disabled>Delete</button>
+        </div>
+        <div class="button-pair zoom" role="group" aria-label="Zoom">
+          <button id="zoom-out" type="button" title="Zoom out (-)" aria-label="Zoom out">&minus;</button>
+          <button id="zoom-fit" type="button" title="Fits the whole song in view (0)">Fit</button>
+          <button id="zoom-in" type="button" title="Zoom in (+)" aria-label="Zoom in">+</button>
+        </div>
+      </div>
+      <div id="arranger-scroll" class="arranger-scroll">
+        <div id="arranger" class="arranger">
+          <div id="ruler" class="ruler" aria-hidden="true"></div>
+          <div id="lane" class="lane" aria-label="The arrangement, left to right. Drag a block to move it, or Alt-drag to copy it."></div>
+          <div id="drop-mark" class="drop-mark" hidden></div>
+          <div id="playhead" class="playhead" hidden></div>
+        </div>
+      </div>
+      <p class="muted hint">Click a part above to add it at the end, or drag it to where it should go. Drag a block to move it, Alt-drag to copy it, and double-click it to edit its part. Changes made while playing are heard from the next Play.</p>
+      <div class="upcoming-wrap">
+        <h3 id="upcoming-title">Playing</h3>
+        <div class="table-wrap">
+          <table id="upcoming" class="upcoming" aria-labelledby="upcoming-title"></table>
+        </div>
+      </div>
+    </div>
   </section>
 
   <aside class="side">
@@ -137,32 +174,44 @@
       <li>In each, connect its instrument, and tick <b>Sync</b>. The badge at the top of this page shows which grids are linked. Rows for grids that aren't open are greyed.</li>
     </ol>
 
-    <h3>Arranging</h3>
+    <h3>Parts</h3>
     <ul>
-      <li>Each column is a section, such as Intro, Verse or Chorus, played left to right. Click its name to change it.</li>
-      <li><b>Bars</b> sets how long the section lasts.</li>
-      <li>Each row is a grid. Choose the pattern it plays in that section, from the patterns kept in the song's <b>Assets</b>, by name, or <b>Off</b> for silence. Add patterns to the assets first, from the grid or from files. A pattern number the song plays with nothing kept for it shows as "(not in Assets)". A pattern shorter than its section repeats, and a longer one is cut at the section's end.</li>
+      <li>A song is made of <b>parts</b>, such as Intro, Verse or Chorus, and the <b>Arranger</b> puts them in the order they play. Switch between the two with the tabs, or Tab.</li>
+      <li>On the <b>Parts</b> tab each column is a part. Click its name to change it, and its colour dot to change the colour of its blocks in the Arranger. A part that isn't in the Arranger yet has its name in grey.</li>
+      <li><b>Bars</b> sets how long the part lasts.</li>
+      <li>Each row is a grid. Choose the pattern it plays in that part, from the patterns kept in the song's <b>Assets</b>, by name, or <b>Off</b> for silence. Add patterns to the assets first, from the grid or from files. A pattern number the song plays with nothing kept for it shows as "(not in Assets)". A pattern shorter than its part repeats, and a longer one is cut at the part's end.</li>
       <li>TD-3 Grid edits one pattern at a time, so its row offers <b>Grid pattern</b>, whatever is in TD-3 Grid when the song plays, and the patterns saved in its library, by name. A library pattern plays without changing the grid. Its library is kept in its library folder, so every pattern saved there is listed.</li>
-      <li>Bars are counted in 4/4. An MPC sequence in another time signature still restarts at each section.</li>
-      <li>Every grid starts its pattern from the first step at the start of each section, so they stay together even when their patterns are different lengths.</li>
-      <li>The buttons above each section move it left or right, copy it, or delete it. <b>Add section</b> adds a copy of the last one at the end.</li>
-      <li>The strip above the table shows each section as a block as wide as its bars, with the one playing filling up. Drag a block onto another to move it there, and click one to go to its column.</li>
-      <li><b>Tempo, fills, presets</b> shows more for each section. <b>Tempo</b> plays it at its own BPM, or leave it empty for the song's. <b>Transpose</b> shifts the notes of every grid but MPC Grid. Each grid's <b>Fill</b> plays in the section's last bar in place of its pattern, or <b>Off</b> for a gap, and needs a section of two bars or more. <b>Preset</b>, for S-1, Protein and Bass Station, sends a program change to pick that preset as the section starts.</li>
-      <li>Warnings under the table point out patterns the arrangement plays that aren't kept with the song, once some are kept from that grid, and TD-3 patterns missing from its library. Their cells are marked.</li>
+      <li>Bars are counted in 4/4. An MPC sequence in another time signature still restarts at each part.</li>
+      <li>Every grid starts its pattern from the first step at the start of each part, so they stay together even when their patterns are different lengths.</li>
+      <li>The buttons above each part move it left or right, copy it, or delete it. Their order on this tab is only for editing. <b>Copy</b> and <b>Add part</b> put the new part at the end of the Arranger too. Deleting a part removes its blocks from the Arranger.</li>
+      <li><b>Tempo, fills, presets</b> shows more for each part. <b>Tempo</b> plays it at its own BPM, or leave it empty for the song's. <b>Transpose</b> shifts the notes of every grid but MPC Grid. Each grid's <b>Fill</b> plays in the part's last bar in place of its pattern, or <b>Off</b> for a gap, and needs a part of two bars or more. <b>Preset</b>, for S-1, Protein and Bass Station, sends a program change to pick that preset as the part starts.</li>
+      <li>Warnings under the table point out patterns a part plays that aren't kept with the song, once some are kept from that grid, and TD-3 patterns missing from its library. Their cells are marked.</li>
+    </ul>
+
+    <h3>Arranger</h3>
+    <ul>
+      <li>The <b>Arranger</b> tab lays the song out left to right as blocks, each a part in its colour, as wide as its bars. A part can be in it any number of times. The ruler above shows the bars, and the time each starts at, and the top of the tab shows how long the song is.</li>
+      <li>Click a part in the row of parts at the top to add it at the end, or drag it to where it should go: a line shows where it will land.</li>
+      <li>Drag a block to move it. Hold Alt (Option) as you drop it to copy it instead.</li>
+      <li>Click a block to pick it. <b>Duplicate</b>, or D, adds a copy after it, and <b>Delete</b>, or the Delete key, removes it. The part stays on the Parts tab. &larr; and &rarr; pick the block before or after. Double-click a block to edit its part.</li>
+      <li><b>&minus;</b> and <b>+</b> zoom out and in, and <b>Fit</b> shows the whole song. The &minus;, + and 0 keys do the same, and so does Ctrl or Cmd with the scroll wheel, or a pinch.</li>
+      <li>Under the arranger, <b>Playing</b> shows what each grid plays in the block playing and the next two, as the song will go, with its loops and what's up next. Before Play it shows how the song starts, or how it goes on from the block picked.</li>
+      <li>While the song plays, a line shows where it is. <b>Play next</b> plays the block picked when the one playing finishes.</li>
+      <li>Songs made before the Arranger play their parts once each, in order, as they did.</li>
     </ul>
 
     <h3>Playing</h3>
     <ul>
       <li><b>Play</b> starts every linked grid at the song's <b>BPM</b>, and <b>Stop</b> stops them. Space does both. Stop on a grid stops them all too.</li>
-      <li>The section playing is highlighted, with the bar above. At the end the grids stop, unless <b>Loop</b> is on.</li>
+      <li>The part playing is highlighted. At the end the grids stop, unless <b>Loop</b> is on.</li>
       <li>Changing the BPM while it plays changes it on every grid.</li>
-      <li>Under each section, the <b>loop</b> button (&#8734;) makes the section repeat each time it's reached, until you click it again. It turns orange while it's on, and it's saved with the song. You can turn it on or off while the song plays, and every grid changes on the next bar.</li>
-      <li>The <b>up next</b> button (&#187;) plays that section when the one playing finishes its run through, even if it's looping. It stays orange until then, and clicking it again cancels it.</li>
-      <li>The bar under the section playing fills as it plays, with the bar it's on beside it. <b>&#9664; Section</b> and <b>Section &#9654;</b>, at the top, jump to the start of the section before or after, on the next bar.</li>
-      <li>Changes to the arrangement while it plays take effect the next time you press Play.</li>
+      <li>Under each part, the <b>loop</b> button (&#8734;) makes the part repeat each time it's reached, until you click it again. It turns orange while it's on, and it's saved with the song. You can turn it on or off while the song plays, and every grid changes on the next bar.</li>
+      <li>The <b>up next</b> button (&#187;) plays that part, from its next block in the Arranger, when the block playing finishes its run through, even if it's looping. It stays orange until then, and clicking it again cancels it.</li>
+      <li>The bar under the part playing fills as it plays, with the bar it's on beside it. <b>&#9664; Part</b> and <b>Part &#9654;</b>, at the top, jump to the start of the block before or after, on the next bar.</li>
+      <li>Changes to the parts or the Arranger while it plays take effect the next time you press Play.</li>
       <li><b>M</b> beside a grid mutes it, and <b>S</b> solos it, muting every other grid. With any soloed, only those play. They work while the song plays, on the next bar, and stay as they are when you press Play.</li>
       <li><b>Count-in</b> clicks for a bar on this computer before the song starts.</li>
-      <li>Keys while it plays: <b>1</b> to <b>9</b> play that section next, <b>L</b> loops the section playing or lets it go, and <b>&larr;</b> and <b>&rarr;</b> jump a section back or forward.</li>
+      <li>Keys while it plays: <b>1</b> to <b>9</b> play that block in the Arranger next, <b>L</b> loops the part playing or lets it go, and <b>&larr;</b> and <b>&rarr;</b> jump a block back or forward.</li>
       <li>While a song plays, the grids switch patterns themselves. Pressing Play on a grid plays it on its own as usual, without the song.</li>
     </ul>
 
@@ -184,13 +233,13 @@
 
     <h3>Takes and set lists</h3>
     <ul>
-      <li><b>Rec</b> records a take. Press it, then play: every section that plays, in order, with your jumps, loops and up nexts, is saved as a new song in Saved songs when the song stops or you press Rec again. Each pass of a looped section is its own section in the take. R does the same.</li>
+      <li><b>Rec</b> records a take. Press it, then play: every block that plays, in order, with your jumps, loops and up nexts, is saved as a new song in Saved songs when the song stops or you press Rec again. Each pass of a looped part is its own block in the take's Arranger. R does the same.</li>
       <li>The <b>Set list</b> plays songs one after another. Click <b>+</b> beside a saved song to add it, and the arrows to change the order. <b>Play set</b> opens each song, puts its assets into the grids, and plays it, then the next when it ends. A song with Loop on doesn't end, so turn Loop off for the set to go on.</li>
     </ul>
 
     <h3>Saving</h3>
     <ul>
-      <li><b>Export MIDI</b> downloads the arrangement as a MIDI file to open in other music software: a track for each grid, made from the patterns kept with the song, with each section's tempo, transpose, fill and preset. Each section plays once. Patterns that aren't kept are left silent, and the status lists them.</li>
+      <li><b>Export MIDI</b> downloads the arrangement as a MIDI file to open in other music software: a track for each grid, made from the patterns kept with the song, with each part's tempo, transpose, fill and preset, in the Arranger's order. Each block plays once. Patterns that aren't kept are left silent, and the status lists them.</li>
       <li>When you open a song with assets, Song Grid offers to load them into the grids.</li>
       <li><b>Save</b> keeps the song in this browser under its name, and <b>Save as new</b> keeps a copy. Click a saved song to open it.</li>
       <li>Songs point to pattern numbers in each grid, so changing a grid's pattern changes the song too.</li>
@@ -218,9 +267,9 @@
 </dialog>
 
 <script src="sync.js?v=202611240021"></script>
-<script src="song.js?v=202611240021"></script>
+<script src="song.js?v=202611261700"></script>
 <script src="grid-icons.js?v=202611261000"></script>
-<script src="app.js?v=202611261400"></script>
+<script src="app.js?v=202611261700"></script>
 <script>
   // The tools menu closes when you click elsewhere or press Escape.
   document.addEventListener("click", (event) => {

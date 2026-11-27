@@ -235,6 +235,35 @@ test("a performance becomes a song of the sections as they played", () => {
   const song = Song.cleanSong({ name: "Live", sections: [{ name: "A", bars: 2 }, { name: "B", bars: 4, loop: true }] });
   const take = Song.fromSections(song, [0, 1, 1, 0, 7], "Live take");
   assert.equal(take.name, "Live take");
-  assert.deepEqual(take.sections.map((item) => [item.name, item.loop]), [["A", false], ["B", false], ["B", false], ["A", false]]);
-  assert.equal(new Set(take.sections.map((item) => item.id)).size, 4);
+  assert.deepEqual(take.sections.map((item) => [item.name, item.loop]), [["A", false], ["B", false]], "each part once");
+  assert.deepEqual(Song.expand(take).sections.map((item) => [item.name, item.loop]), [["A", false], ["B", false], ["B", false], ["A", false]]);
+  assert.equal(new Set(take.order.map((item) => item.id)).size, 4);
+});
+
+test("a song saved before the arranger plays its parts once each, in order", () => {
+  const song = Song.cleanSong({ sections: [{ id: "a", name: "A", bars: 2 }, { id: "b", name: "B", bars: 4 }] });
+  assert.deepEqual(song.order.map((item) => item.part), ["a", "b"]);
+  assert.equal(Song.totalBars(song), 6);
+  assert.ok(song.sections.every((item) => Number.isInteger(item.colour)), "every part gets a colour");
+  assert.notEqual(song.sections[0].colour, song.sections[1].colour);
+});
+
+test("the arrangement plays parts in its own order, any number of times", () => {
+  const song = Song.cleanSong({
+    sections: [{ id: "v", name: "Verse", bars: 8, patterns: { "S-1 Grid": 1 } }, { id: "c", name: "Chorus", bars: 4, patterns: { "S-1 Grid": 2 }, loop: true }],
+    order: [{ id: "1", part: "c" }, { id: "2", part: "v" }, { id: "3", part: "c" }, { id: "x", part: "gone" }, { id: "1", part: "v" }],
+  });
+  assert.equal(song.order.length, 4, "a block of a part the song hasn't is dropped");
+  assert.equal(new Set(song.order.map((item) => item.id)).size, 4, "a repeated block id is replaced");
+  assert.equal(Song.totalBars(song), 24);
+  assert.deepEqual(Song.plan(song).parts["S-1 Grid"].map((cue) => [cue.bar, cue.pattern]), [[0, 2], [4, 1], [12, 2], [16, 1]]);
+  assert.deepEqual(Song.bounds(song)[2], { start: 12, end: 16 });
+  assert.deepEqual(Song.loops(song), [{ start: 0, end: 4 }, { start: 12, end: 16 }]);
+  assert.deepEqual(Song.sectionAt(song, 13), { index: 2, bar: 1 });
+  const played = Song.expand(song);
+  assert.equal(played.sections[2].part, "c");
+  assert.equal(played.sections[2].id, song.order[2].id);
+  assert.equal(Song.expand(played), played);
+  assert.equal(Song.seconds(song), 48);
+  assert.equal(Song.cleanSong({ ...JSON.parse(JSON.stringify(song)), order: [] }).order.length, 0, "an empty arrangement stays empty");
 });

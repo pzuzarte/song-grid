@@ -18,13 +18,15 @@ Visits to the page are counted anonymously with
 
 ## What it does
 
-- **Sections:** a song is a row of sections, such as Intro, Verse and Chorus, each some bars
-  long. Move, copy and delete them.
-- **Patterns:** for each section, choose the pattern each grid plays, 1 to 16, or Off. Every
-  grid starts its pattern from the first step at the start of each section, so they stay
+- **Parts:** a song is made of parts, such as Intro, Verse and Chorus, each some bars long
+  and in its own colour. For each part, choose the pattern each grid plays, or Off. Every
+  grid starts its pattern from the first step at the start of each part, so they stay
   together even when their patterns are different lengths.
-- **Play:** starts every linked grid at the song's tempo, highlights the section playing,
-  and stops them all at the end, or loops.
+- **Arranger:** lays the parts out in the order they play, as coloured blocks on a timeline
+  of bars and minutes. Add parts, drag blocks about, duplicate or delete them, and zoom in
+  and out. Under it, a grid shows what each grid plays now and in the next two blocks.
+- **Play:** starts every linked grid at the song's tempo, shows where the song is, and stops
+  them all at the end, or loops.
 - **Saved songs:** kept in the browser by name, with backup and restore to a file.
 
 ## How it works

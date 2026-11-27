@@ -1,7 +1,13 @@
 "use strict";
-/* A song: sections in order, each some bars long, with the pattern each grid plays in it,
-   or none. Kept apart from the page so it can be tested. plan() turns a song into what
-   the grids follow, as sent through sync.js.
+/* A song: its parts (song.sections), each some bars long, with the pattern each grid
+   plays in it, or none, and the arrangement (song.order), the parts in the order they
+   play, as blocks. A part can be in the arrangement any number of times, or not at all.
+   Kept apart from the page so it can be tested. plan() turns a song into what the grids
+   follow, as sent through sync.js.
+
+   expand() gives the song as it plays: a copy whose sections are the blocks, in order,
+   each a copy of its part with the block's id, and the part's id as part. The functions
+   about playing (plan, bounds, sectionAt, totalBars and so on) take either.
 
    Most grids have 16 numbered patterns, counted here from 0. TD-3 Grid edits one pattern
    at a time, so its part names either "grid", the pattern in its grid, or the id of a
@@ -20,7 +26,9 @@ const Song = (() => {
   const GRID = "grid"; // TD-3 Grid's own pattern, rather than one from its library.
   const PATTERNS = 16;
   const BAR_CHOICES = [1, 2, 4, 8, 12, 16, 24, 32, 64];
-  const MAX_SECTIONS = 64;
+  const MAX_SECTIONS = 64; // Parts in a song.
+  const MAX_BLOCKS = 256; // Blocks in its arrangement.
+  const COLOURS = 10; // Each part has one of these, so its blocks can be told apart.
 
   const newId = () => `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
@@ -61,17 +69,60 @@ const Song = (() => {
       transpose: Number.isInteger(fields.transpose) && fields.transpose >= -12 && fields.transpose <= 12 ? fields.transpose : 0,
       fills,
       programs,
+      colour: Number.isInteger(fields.colour) && fields.colour >= 0 && fields.colour < COLOURS ? fields.colour : null,
     };
   }
 
+  // The colour least used by a song's other parts, for a new one.
+  function freeColour(sections, except = null) {
+    const counts = Array.from({ length: COLOURS }, () => 0);
+    for (const item of sections) if (item !== except && item.colour !== null) counts[item.colour] += 1;
+    return counts.indexOf(Math.min(...counts));
+  }
+
+  // Gives every part without a colour one.
+  function colourParts(sections) {
+    for (const item of sections) if (item.colour === null) item.colour = freeColour(sections, item);
+  }
+
+  const block = (part, id = newId()) => ({ id, part });
+
+  // The arrangement as saved, checked: blocks of parts the song has. A song saved before
+  // there was an arrangement plays its parts once each, in order, as it did.
+  function cleanOrder(data, sections) {
+    if (!Array.isArray(data)) return sections.map((item) => block(item.id));
+    const parts = new Set(sections.map((item) => item.id));
+    const ids = new Set();
+    return data.filter((entry) => entry && parts.has(entry.part)).slice(0, MAX_BLOCKS).map((entry) => {
+      const id = typeof entry.id === "string" && !ids.has(entry.id) ? entry.id : newId();
+      ids.add(id);
+      return block(entry.part, id);
+    });
+  }
+
+  // The song as it plays: its blocks as sections, in order. See the top of this file.
+  function expand(song) {
+    if (song.expanded) return song;
+    const parts = new Map(song.sections.map((item) => [item.id, item]));
+    const sections = (song.order || song.sections.map((item) => block(item.id)))
+      .filter((entry) => parts.has(entry.part))
+      .map((entry) => ({ ...JSON.parse(JSON.stringify(parts.get(entry.part))), id: entry.id, part: entry.part }));
+    return { ...song, sections, order: null, expanded: true };
+  }
+
+  const blocks = (song) => expand(song).sections;
+
   function newSong() {
-    return {
+    const song = {
       name: "",
       bpm: 120,
       loop: false,
-      sections: [section({ name: "Intro", bars: 4 }), section({ name: "Main", bars: 8 })],
+      sections: [section({ name: "Intro", bars: 4, colour: 0 }), section({ name: "Main", bars: 8, colour: 1 })],
+      order: [],
       assets: {},
     };
+    song.order = song.sections.map((item) => block(item.id));
+    return song;
   }
 
   /* A song's assets: for each grid, the patterns and sound collected from it, kept with the
@@ -155,7 +206,7 @@ const Song = (() => {
   }
 
   // Whether the arrangement plays a pattern, by the ref it knows it by.
-  const usesPattern = (song, name, ref) => song.sections.some((item) => item.patterns[name] === ref);
+  const usesPattern = (song, name, ref) => blocks(song).some((item) => item.patterns[name] === ref);
 
   // A song from saved data, with anything missing or wrong set to a default.
   function cleanSong(data) {
@@ -174,10 +225,15 @@ const Song = (() => {
         ids.add(item.id);
       }
     }
+    colourParts(song.sections);
+    song.order = cleanOrder(Array.isArray(data.sections) && data.sections.length ? data.order : null, song.sections);
     return song;
   }
 
-  const totalBars = (song) => song.sections.reduce((sum, item) => sum + item.bars, 0);
+  const totalBars = (song) => blocks(song).reduce((sum, item) => sum + item.bars, 0);
+
+  // How long the arrangement takes to play once, in seconds, with each part's tempo.
+  const seconds = (song) => blocks(song).reduce((sum, item) => sum + (item.bars * 4 * 60) / (item.bpm ?? song.bpm), 0);
 
   // Which grids play what, from which bar. Each section starts its patterns from their
   // first step, so every grid lines up at the start of each section.
@@ -186,9 +242,10 @@ const Song = (() => {
   function plan(song, { mutes = [] } = {}) {
     const parts = {};
     for (const { name } of INSTRUMENTS) parts[name] = [];
-    const tempos = song.sections.some((item) => item.bpm !== null);
+    const played = blocks(song);
+    const tempos = played.some((item) => item.bpm !== null);
     let bar = 0;
-    for (const item of song.sections) {
+    for (const item of played) {
       for (const instrument of INSTRUMENTS) {
         const { name } = instrument;
         const cue = { bar, pattern: item.patterns[name] };
@@ -208,14 +265,21 @@ const Song = (() => {
   }
 
   // The tempo a song starts at.
-  const startBpm = (song) => song.sections[0]?.bpm ?? song.bpm;
+  const startBpm = (song) => blocks(song)[0]?.bpm ?? song.bpm;
 
-  // A song made from the sections played, in the order they played, such as from a
-  // performance with its jumps and loops. Each pass of a looped section is its own copy.
+  // A song made from the blocks played, in the order they played, such as from a
+  // performance with its jumps and loops: an arrangement with a block for each pass of a
+  // looped part, of the parts that played, none of them looping.
   function fromSections(song, indexes, name) {
-    const sections = indexes.filter((index) => song.sections[index]).slice(0, MAX_SECTIONS)
-      .map((index) => ({ ...JSON.parse(JSON.stringify(song.sections[index])), id: undefined, loop: false }));
-    return cleanSong({ ...JSON.parse(JSON.stringify(song)), name, sections, loop: false });
+    const played = blocks(song);
+    const picked = indexes.filter((index) => played[index]).slice(0, MAX_BLOCKS).map((index) => played[index]);
+    const sections = [];
+    for (const item of picked) {
+      const part = item.part || item.id;
+      if (!sections.some((entry) => entry.id === part)) sections.push({ ...JSON.parse(JSON.stringify(item)), id: part, part: undefined, loop: false });
+    }
+    const order = picked.map((item) => ({ part: item.part || item.id }));
+    return cleanSong({ ...JSON.parse(JSON.stringify({ ...song, expanded: undefined })), name, sections, order, loop: false });
   }
 
   /* Things in a song that won't play as it looks like they will: a pattern the arrangement
@@ -307,7 +371,8 @@ const Song = (() => {
     const missing = new Set();
     let start = 0;
     let bpm = null;
-    for (const item of song.sections) {
+    const played = blocks(song);
+    for (const item of played) {
       const itemBpm = item.bpm ?? song.bpm;
       if (itemBpm !== bpm) conductor.push({ time: start, order: 0, data: tempo(itemBpm) });
       bpm = itemBpm;
@@ -320,7 +385,7 @@ const Song = (() => {
       const events = [];
       const kept = song.assets[name]?.patterns || [];
       let at = 0;
-      for (const item of song.sections) {
+      for (const item of played) {
         const end = at + item.bars * BAR;
         const hasFill = item.bars > 1 && name in item.fills;
         const shift = instrument.melodic ? item.transpose : 0;
@@ -358,10 +423,10 @@ const Song = (() => {
     return { bytes: new Uint8Array([...header, ...track(conductor), ...tracks.flat()]), missing: [...missing] };
   }
 
-  // Where each section starts and ends, in bars.
+  // Where each block starts and ends, in bars.
   function bounds(song) {
     let start = 0;
-    return song.sections.map((item) => {
+    return blocks(song).map((item) => {
       const range = { start, end: start + item.bars };
       start = range.end;
       return range;
@@ -369,12 +434,15 @@ const Song = (() => {
   }
 
   // The stretches of bars that repeat: the sections with Loop on.
-  const loops = (song) => bounds(song).filter((range, index) => song.sections[index].loop);
+  const loops = (song) => {
+    const played = blocks(song);
+    return bounds(song).filter((range, index) => played[index].loop);
+  };
 
   // The section playing at a bar counted from 0, and the bar within it.
   function sectionAt(song, bar) {
     let start = 0;
-    for (const [index, item] of song.sections.entries()) {
+    for (const [index, item] of blocks(song).entries()) {
       if (bar < start + item.bars) return { index, bar: bar - start };
       start += item.bars;
     }
@@ -382,8 +450,8 @@ const Song = (() => {
   }
 
   return {
-    BAR_CHOICES, GRID, INSTRUMENTS, MAX_SECTIONS, PATTERNS, addAssets, bounds, cleanAssets, cleanSong, fromSections, loops, moveAsset, newSong,
-    plan, section, sectionAt, startBpm, toMidi, totalBars, usesPattern, warnings,
+    BAR_CHOICES, COLOURS, GRID, INSTRUMENTS, MAX_BLOCKS, MAX_SECTIONS, PATTERNS, addAssets, block, bounds, cleanAssets, cleanSong, expand,
+    freeColour, fromSections, loops, moveAsset, newSong, plan, seconds, section, sectionAt, startBpm, toMidi, totalBars, usesPattern, warnings,
   };
 })();
 
