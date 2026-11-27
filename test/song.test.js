@@ -109,8 +109,8 @@ test("a song keeps the assets collected from each grid", () => {
   });
   assert.deepEqual(Object.keys(song.assets), ["S-1 Grid", "TD-3 Grid"]);
   assert.deepEqual(song.assets["S-1 Grid"].patterns.map((item) => item.label), ["Pattern 3", "Pattern 6"]);
-  assert.equal(song.assets["S-1 Grid"].sound.label, "The sound in S-1 Grid's controls");
-  assert.equal(song.assets["TD-3 Grid"].sound, null);
+  assert.equal(Song.mainSound(song.assets["S-1 Grid"]).label, "The sound in S-1 Grid's controls", "a song saved with one sound keeps it");
+  assert.equal(Song.mainSound(song.assets["TD-3 Grid"]), null);
   assert.equal(Song.usesPattern(song, "S-1 Grid", 2), true);
   assert.equal(Song.usesPattern(song, "S-1 Grid", 5), false);
   assert.equal(Song.usesPattern(song, "TD-3 Grid", "pacid"), true);
@@ -130,7 +130,7 @@ test("patterns picked from a library go where the arrangement needs them", () =>
   // Picking one again keeps it where it is. A pattern for a number already used replaces it.
   Song.addAssets(song, "S-1 Grid", { patterns: [pattern("patch:Acid"), pattern("slot:0", 0)], sound: { label: "Warm", data: { values: { 74: 9 } } } }, "t2");
   assert.deepEqual(song.assets["S-1 Grid"].patterns.map((item) => [item.id, item.ref]), [["slot:0", 0], ["patch:Acid", 3], ["slot:7", 7]]);
-  assert.equal(song.assets["S-1 Grid"].sound.label, "Warm");
+  assert.deepEqual(song.assets["S-1 Grid"].sounds.map((item) => item.label), ["Warm"]);
   assert.equal(song.assets["S-1 Grid"].collected, "t2");
   // Moving one swaps it with the pattern in the number it moves to.
   Song.moveAsset(song, "S-1 Grid", "patch:Acid", 7);
@@ -266,4 +266,22 @@ test("the arrangement plays parts in its own order, any number of times", () => 
   assert.equal(Song.expand(played), played);
   assert.equal(Song.seconds(song), 48);
   assert.equal(Song.cleanSong({ ...JSON.parse(JSON.stringify(song)), order: [] }).order.length, 0, "an empty arrangement stays empty");
+});
+
+test("Bass Station and Protein keep several sounds, and the others one", () => {
+  const song = Song.cleanSong({});
+  const sound = (label) => ({ id: `lib:${label}`, label, data: { values: { 1: label.length } } });
+  Song.addAssets(song, "Bass Station Grid", { sounds: [sound("Sub"), sound("Wobble")] });
+  Song.addAssets(song, "Bass Station Grid", { sound: sound("Pluck") });
+  Song.addAssets(song, "Bass Station Grid", { sounds: [{ ...sound("Sub"), data: { values: { 1: 99 } } }] });
+  const kept = song.assets["Bass Station Grid"];
+  assert.deepEqual(kept.sounds.map((item) => item.label), ["Sub", "Wobble", "Pluck"], "one with the same name is replaced where it was");
+  assert.equal(kept.sounds[0].data.values[1], 99);
+  assert.equal(Song.mainSound(kept).label, "Sub");
+  Song.makeMainSound(song, "Bass Station Grid", kept.sounds[2].id);
+  assert.deepEqual(song.assets["Bass Station Grid"].sounds.map((item) => item.label), ["Pluck", "Sub", "Wobble"]);
+  Song.addAssets(song, "S-1 Grid", { sounds: [sound("A"), sound("B")] });
+  assert.deepEqual(song.assets["S-1 Grid"].sounds.map((item) => item.label), ["B"]);
+  const again = Song.cleanSong(JSON.parse(JSON.stringify(song)));
+  assert.deepEqual(again.assets["Bass Station Grid"].sounds.map((item) => item.label), ["Pluck", "Sub", "Wobble"]);
 });

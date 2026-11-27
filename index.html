@@ -219,9 +219,9 @@
     <ul>
       <li>The <b>Assets</b> panel keeps the patterns and sounds this song uses, with the song, so they're in one place and saved with it, in its backups too.</li>
       <li><b>Add file&hellip;</b>, beside a grid, opens the Mac's Open dialog to choose pattern files on this computer: S-1 patch files, Protein Grid and Bass Station Grid pattern files, or TD-3 .syx files. Choose several at once if you like. The grid reads them as it would its own, so they come with their names, and the Bass Station's and Protein's with their sounds, and they're kept with the song. TD-3 patterns are added to its library too. The grid needs to be open with Sync ticked. It remembers the last folder you used for each grid.</li>
-      <li><b>Add</b>, beside a grid, lists what it has: the patterns in it now, the patterns saved in its library, and sounds. Tick the ones this song needs, choose a sound if you want one, and press <b>Add to song</b>. Search, and <b>&#9733; Favourites</b>, narrow a long library.</li>
+      <li><b>Add</b>, beside a grid, lists what it has: the patterns in it now, the patterns saved in its library, and sounds. Tick the ones this song needs, choose a sound if you want one, and press <b>Add to song</b>. Search, <b>&#9733; Favourites</b> and the tag buttons narrow a long library: they show the favourites and tags you gave things in each grid's library, and you can pick several tags at once.</li>
       <li>What each offers: S-1 Grid, its patterns and the patches in its library, as patterns and as sounds. Protein Grid and Bass Station Grid, their patterns, the patterns saved in their library folder, and the sounds in their sound library. MPC Grid, the sequences in the open project. TD-3 Grid, its grid pattern and its library. A grid needs its library folder open to list it: Choose library folder, or Allow library folder, is beside Save in each grid.</li>
-      <li>A song keeps one sound for each grid: the one you pick replaces the one it had. Protein Grid reads only the settings you've mapped from a sound, so click Teach reading on its Synth tab once first. The TD-3 and the MPC have no sound to keep: the TD-3's is set by its knobs, and the MPC's samples stay in its project.</li>
+      <li>A song can keep several sounds from Bass Station Grid and Protein Grid: tick each one it needs. The first is the <b>main</b> sound, which <b>Load</b> and <b>Load all</b> send; click <b>Main</b> beside another to make it the main one, and &uarr; beside any sound sends just that one. A sound with the same name as one kept replaces it. Collect all keeps the others, and puts the sound in the controls first. The other grids keep one sound for each song: the one you pick replaces the one it had. Protein Grid reads only the settings you've mapped from a sound, so click Teach reading on its Synth tab once first. The TD-3 and the MPC have no sound to keep: the TD-3's is set by its knobs, and the MPC's samples stay in its project.</li>
       <li>Each pattern kept goes in a pattern number, shown beside it. One from a grid keeps its own. One from a library goes in the first number the arrangement plays that has nothing kept for it, or else the first free one. Choose another number to move it, which swaps it with the pattern there.</li>
       <li><b>Collect all</b> copies everything in every linked grid at once: each pattern with notes or knob movements, and the sound in its controls, or the one the Bass Station is playing. It replaces what was kept from each grid before.</li>
       <li>Patterns the arrangement plays are marked <b>Used</b>. Remove anything the song doesn't need with &times;.</li>
@@ -255,7 +255,7 @@
   </div>
   <div class="picker-tools">
     <input id="picker-search" type="search" placeholder="Search" spellcheck="false" aria-label="Search">
-    <button id="picker-favourites" type="button" class="toggle" aria-pressed="false" title="Shows only the favourites starred in the grid's library">&#9733; Favourites</button>
+    <div id="picker-tags" class="tag-bar" role="group" aria-label="Show only favourites, or those with a tag"></div>
   </div>
   <div id="picker-body" class="picker-body"></div>
   <div class="picker-foot">
@@ -267,9 +267,10 @@
 </dialog>
 
 <script src="sync.js?v=202611240021"></script>
-<script src="song.js?v=202611261700"></script>
+<script src="song.js?v=202611261900"></script>
+<script src="library-tags.js?v=202611261900"></script>
 <script src="grid-icons.js?v=202611261000"></script>
-<script src="app.js?v=202611261830"></script>
+<script src="app.js?v=202611261900"></script>
 <script>
   // The tools menu closes when you click elsewhere or press Escape.
   document.addEventListener("click", (event) => {

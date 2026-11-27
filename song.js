@@ -17,8 +17,9 @@ const Song = (() => {
     // melodic: a section's transpose shifts its notes. presets: it can be sent a program
     // change to pick a preset. channel: its MIDI channel, from 0, in an exported MIDI file.
     { name: "S-1 Grid", label: "S-1", url: "https://pzuzarte.github.io/s1-grid/", melodic: true, presets: true, channel: 0 },
-    { name: "Protein Grid", label: "Protein", url: "https://pzuzarte.github.io/protein-grid/", melodic: true, presets: true, channel: 1 },
-    { name: "Bass Station Grid", label: "Bass Station", url: "https://pzuzarte.github.io/bass-station-grid/", melodic: true, presets: true, channel: 2 },
+    // sounds: a song can keep several of its sounds, not just one.
+    { name: "Protein Grid", label: "Protein", url: "https://pzuzarte.github.io/protein-grid/", melodic: true, presets: true, sounds: true, channel: 1 },
+    { name: "Bass Station Grid", label: "Bass Station", url: "https://pzuzarte.github.io/bass-station-grid/", melodic: true, presets: true, sounds: true, channel: 2 },
     { name: "MPC Grid", label: "MPC", url: "https://pzuzarte.github.io/mpc-grid/", word: "Sequence", channel: 9 },
     { name: "TD-3 Grid", label: "TD-3", url: "https://pzuzarte.github.io/td3-grid/", library: true, melodic: true, channel: 3 },
   ];
@@ -28,6 +29,7 @@ const Song = (() => {
   const BAR_CHOICES = [1, 2, 4, 8, 12, 16, 24, 32, 64];
   const MAX_SECTIONS = 64; // Parts in a song.
   const MAX_BLOCKS = 256; // Blocks in its arrangement.
+  const MAX_SOUNDS = 32; // Sounds kept from one grid.
   const COLOURS = 10; // Each part has one of these, so its blocks can be told apart.
 
   const newId = () => `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -128,7 +130,9 @@ const Song = (() => {
   /* A song's assets: for each grid, the patterns and sound collected from it, kept with the
      song. Each pattern has an id, the ref the arrangement uses for it (a pattern number, or
      for TD-3 Grid "grid" or a library id), a label, its length, how many notes it has, and
-     the grid's own data for it. The sound is { label, data }, or null. */
+     the grid's own data for it. sounds are { id, label, data }: the first is the one Load
+     sends, its main sound. Most grids keep one, and Protein Grid and Bass Station Grid
+     can keep several, each sent with its own button. mainSound() gives the first, or null. */
   function cleanAssets(data) {
     const assets = {};
     if (!data || typeof data !== "object") return assets;
@@ -142,9 +146,17 @@ const Song = (() => {
           length: typeof entry.length === "string" ? entry.length.slice(0, 30) : "",
           notes: Number.isInteger(entry.notes) ? entry.notes : 0, data: entry.data,
         }));
-      const sound = item.sound && typeof item.sound.label === "string" && item.sound.data && typeof item.sound.data === "object"
-        ? { label: item.sound.label.slice(0, 80), data: item.sound.data } : null;
-      assets[name] = { collected: typeof item.collected === "string" ? item.collected : "", patterns, sound };
+      // Songs saved before there could be several kept one, as sound.
+      const ids = new Set();
+      const sounds = (Array.isArray(item.sounds) ? item.sounds : [item.sound])
+        .filter((entry) => entry && typeof entry.label === "string" && entry.data && typeof entry.data === "object")
+        .slice(0, MAX_SOUNDS).map((entry) => {
+          let id = typeof entry.id === "string" ? entry.id.slice(0, 80) : `sound:${entry.label}`;
+          while (ids.has(id)) id = `${id}+`;
+          ids.add(id);
+          return { id, label: entry.label.slice(0, 80), data: entry.data };
+        });
+      assets[name] = { collected: typeof item.collected === "string" ? item.collected : "", patterns, sounds };
     }
     return assets;
   }
@@ -155,10 +167,10 @@ const Song = (() => {
      number the arrangement plays that has nothing kept for it, or else the first free one.
      Each pattern number holds one pattern, so a pattern put in one replaces what was there.
      Gives how many patterns were added, and how many didn't fit. */
-  function addAssets(song, name, { patterns = [], sound = null } = {}, collected = new Date().toISOString()) {
+  function addAssets(song, name, { patterns = [], sound = null, sounds = null } = {}, collected = new Date().toISOString()) {
     const instrument = INSTRUMENTS.find((item) => item.name === name);
     if (!instrument) return { added: 0, full: 0 };
-    const kept = song.assets[name] || { collected: "", patterns: [], sound: null };
+    const kept = song.assets[name] || { collected: "", patterns: [], sounds: [] };
     let added = 0;
     let full = 0;
     for (const entry of patterns) {
@@ -177,11 +189,35 @@ const Song = (() => {
       kept.patterns.push({ ...entry, ref });
       added += 1;
     }
-    if (sound) kept.sound = sound;
+    kept.sounds = addSounds(instrument, kept.sounds, sounds || (sound ? [sound] : []));
     kept.collected = collected;
     if (!instrument.library) kept.patterns.sort((a, b) => a.ref - b.ref);
     song.assets[name] = cleanAssets({ [name]: kept })[name];
     return { added, full };
+  }
+
+  /* Adds sounds to those kept from a grid. One with the same name as one kept replaces it,
+     where it was. A grid that keeps one sound keeps the last one added. */
+  function addSounds(instrument, kept = [], added = []) {
+    const list = instrument.sounds ? [...kept] : [];
+    for (const entry of added) {
+      if (!entry || typeof entry.label !== "string") continue;
+      const same = list.findIndex((item) => item.label === entry.label);
+      const sound = { id: entry.id || `sound:${entry.label}`, label: entry.label, data: entry.data };
+      if (same >= 0) list[same] = { ...sound, id: list[same].id };
+      else if (instrument.sounds) list.push(sound);
+      else list.splice(0, list.length, sound);
+    }
+    return list.slice(0, MAX_SOUNDS);
+  }
+
+  const mainSound = (kept) => kept?.sounds?.[0] || null;
+
+  // Makes a kept sound the main one, which Load sends.
+  function makeMainSound(song, name, id) {
+    const kept = song.assets[name];
+    const index = kept?.sounds.findIndex((item) => item.id === id) ?? -1;
+    if (index > 0) kept.sounds.unshift(...kept.sounds.splice(index, 1));
   }
 
   // The pattern number a library pattern goes in, or null if every one holds a pattern.
@@ -295,7 +331,7 @@ const Song = (() => {
           if (ref === null || ref === undefined) return;
           if (instrument.library && ref !== GRID && td3Library && !td3Library.some((entry) => entry.id === ref)) {
             found.push({ section: index, name, text: `${instrument.label} ${what} in "${item.name}" isn't in TD-3 Grid's library.` });
-          } else if (kept && (kept.patterns.length || kept.sound) && !kept.patterns.some((entry) => entry.ref === ref)) {
+          } else if (kept && (kept.patterns.length || kept.sounds.length) && !kept.patterns.some((entry) => entry.ref === ref)) {
             const label = instrument.library ? (ref === GRID ? "the grid pattern" : "a library pattern") : `${(instrument.word || "Pattern").toLowerCase()} ${ref + 1}`;
             found.push({ section: index, name, text: `${instrument.label} plays ${label} ${what === "pattern" ? "" : "as its fill "}in "${item.name}", which isn't kept with the song.`.replace("  ", " ") });
           }
@@ -450,8 +486,8 @@ const Song = (() => {
   }
 
   return {
-    BAR_CHOICES, COLOURS, GRID, INSTRUMENTS, MAX_BLOCKS, MAX_SECTIONS, PATTERNS, addAssets, block, bounds, cleanAssets, cleanSong, expand,
-    freeColour, fromSections, loops, moveAsset, newSong, plan, seconds, section, sectionAt, startBpm, toMidi, totalBars, usesPattern, warnings,
+    BAR_CHOICES, COLOURS, GRID, INSTRUMENTS, MAX_BLOCKS, MAX_SECTIONS, MAX_SOUNDS, PATTERNS, addAssets, addSounds, block, bounds, cleanAssets, cleanSong, expand,
+    freeColour, fromSections, loops, mainSound, makeMainSound, moveAsset, newSong, plan, seconds, section, sectionAt, startBpm, toMidi, totalBars, usesPattern, warnings,
   };
 })();
 
