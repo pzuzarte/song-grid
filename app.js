@@ -409,8 +409,8 @@ function render() {
       link.href = instrument.url;
       link.target = "_blank";
       link.rel = "noopener";
-      link.textContent = "Not open";
-      link.title = `Open ${instrument.name}, and tick Sync`;
+      link.textContent = "Not linked";
+      link.title = `Open ${instrument.name}, or go to it if it's open, and tick Sync at its top`;
       note.append(link);
     }
     label.append(note);
@@ -1161,6 +1161,11 @@ function removeAsset(name, id) {
   });
 }
 
+// Says what to do when a grid Song Grid needs isn't linked.
+function notLinked(instrument) {
+  setStatus(`${instrument.name} isn't linked. Open it (click "Not linked" under ${instrument.label} in the arrangement), or go to its tab if it's open, and tick Sync at its top. Then click Add again.`, true);
+}
+
 function renderAssets() {
   const busy = Boolean(collecting || loading);
   $("collect-all").disabled = busy;
@@ -1174,17 +1179,18 @@ function renderAssets() {
     if (collecting?.asked.has(instrument.name) && !collecting.answered.has(instrument.name)) note.textContent = "Collecting...";
     else if (waiting) note.textContent = "Putting back...";
     else if (kept) note.textContent = `Collected ${shortDate(kept.collected)}: ${kept.patterns.length} pattern${kept.patterns.length === 1 ? "" : "s"}${kept.sound ? ", sound" : ""}`;
-    else note.textContent = "Nothing kept yet";
+    else note.textContent = peers.includes(instrument.name) ? "Nothing kept yet" : `Tick Sync in ${instrument.name} to add`;
     const open = peers.includes(instrument.name);
+    // Add stays clickable when the grid isn't linked, to say what to do.
     const button = toolButton("Add", open ? `Pick patterns${instrument.library || instrument.word ? "" : " and a sound"} from ${instrument.name} and its library to keep with this song` : `Open ${instrument.name}, with Sync ticked, to pick from it`,
-      () => openPicker(instrument.name), !open || busy);
+      () => (open ? openPicker(instrument.name) : notLinked(instrument)), busy);
     const load = toolButton("Load", !hasAssets(instrument.name) ? "Nothing is kept from this grid yet"
       : open ? `Put this song's ${instrument.label} patterns${kept.sound ? " and sound" : ""} back into ${instrument.name}` : `Open ${instrument.name}, with Sync ticked, to put them back into it`,
     () => loadInto([instrument.name]), !open || !hasAssets(instrument.name) || busy);
     head.append(Object.assign(document.createElement("strong"), { textContent: instrument.label }), note, button);
     if (FILE_TYPES[instrument.name]) {
       head.append(toolButton("Add file\u2026", open ? `Choose ${instrument.label} pattern files on this computer to keep with this song` : `Open ${instrument.name}, with Sync ticked, to read its files`,
-        () => addFiles(instrument.name), !open || busy));
+        () => (open ? addFiles(instrument.name) : notLinked(instrument)), busy));
     }
     head.append(load);
     group.append(head);
