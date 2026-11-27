@@ -64,7 +64,7 @@ function restore() {
   prefs.countIn = Boolean(kept.countIn);
   prefs.more = Boolean(kept.more);
   prefs.tab = kept.tab === "arranger" ? "arranger" : "parts";
-  prefs.zoom = ZOOMS.includes(kept.zoom) ? kept.zoom : 24;
+  prefs.zoom = Number.isFinite(kept.zoom) ? clampZoom(kept.zoom) : 24;
   const list = readJson(SETLIST_KEY, []);
   setList = Array.isArray(list) ? list.filter((id) => typeof id === "string") : [];
 }
@@ -509,8 +509,13 @@ function renderTabs() {
 // Each part's colour, by its colour number. Dark text reads on all of them.
 const PART_COLOURS = ["#e5675d", "#ec9a3f", "#d9c143", "#74bf5b", "#3db6a4", "#4fa0e2", "#8284ea", "#b673e0", "#e273b0", "#a8957f"];
 const partColour = (item) => PART_COLOURS[(item?.colour ?? 0) % PART_COLOURS.length];
-// Pixels a bar is wide, at each zoom.
-const ZOOMS = [4, 6, 10, 16, 24, 36, 56, 80, 120];
+// How wide a bar is, in pixels: anything between these, so Fit can fill the view exactly.
+const MIN_ZOOM = 1.5;
+const MAX_ZOOM = 400;
+const ZOOM_STEP = 1.4; // Each - or + changes it by this much.
+const LANE_START = 8; // Pixels before the first bar.
+const LANE_END = 32; // Room after the last block, to drop one at the end.
+const clampZoom = (zoom) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
 const partById = (id) => song.sections.find((item) => item.id === id);
 
 // Minutes and seconds.
@@ -533,24 +538,23 @@ function setZoom(zoom, anchor = null) {
   const scroll = $("arranger-scroll");
   // Keeps the bar in the middle, or under the pointer, where it is.
   const x = anchor ?? scroll.clientWidth / 2;
-  const bar = (scroll.scrollLeft + x - 8) / prefs.zoom;
-  prefs.zoom = zoom;
+  const bar = (scroll.scrollLeft + x - LANE_START) / prefs.zoom;
+  prefs.zoom = clampZoom(zoom);
   savePrefs();
   renderArranger();
-  scroll.scrollLeft = bar * zoom + 8 - x;
+  scroll.scrollLeft = bar * prefs.zoom + LANE_START - x;
 }
 
 function zoomBy(steps, anchor) {
-  const index = ZOOMS.indexOf(prefs.zoom);
-  const next = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, index + steps))];
+  const next = clampZoom(prefs.zoom * ZOOM_STEP ** steps);
   if (next !== prefs.zoom) setZoom(next, anchor);
 }
 
-// The largest zoom that shows the whole song.
+// The zoom that shows the whole song, filling the view.
 function zoomToFit() {
-  const width = $("arranger-scroll").clientWidth - 24;
+  const width = $("arranger-scroll").clientWidth - LANE_START - LANE_END;
   const bars = Math.max(1, Song.totalBars(song));
-  setZoom([...ZOOMS].reverse().find((zoom) => zoom * bars <= width) || ZOOMS[0]);
+  setZoom(width / bars);
   $("arranger-scroll").scrollLeft = 0;
 }
 
@@ -559,11 +563,12 @@ function renderArranger() {
   const played = Song.expand(song).sections;
   const bars = Song.totalBars(song);
   const times = barTimes();
-  // Room after the last block to drop one at the end.
-  const width = Math.max(bars + 8, 16) * zoom + 16;
+  // The song, with room after it to drop a block at the end, and at least the view's width.
+  const view = $("arranger-scroll").clientWidth;
+  const width = Math.max(LANE_START + bars * zoom + LANE_END, view);
   $("arranger").style.width = `${width}px`;
-  $("zoom-out").disabled = prefs.zoom === ZOOMS[0];
-  $("zoom-in").disabled = prefs.zoom === ZOOMS[ZOOMS.length - 1];
+  $("zoom-out").disabled = prefs.zoom <= MIN_ZOOM;
+  $("zoom-in").disabled = prefs.zoom >= MAX_ZOOM;
 
   // The parts, to add.
   $("part-chips").replaceChildren(...song.sections.map((item) => {
@@ -579,9 +584,10 @@ function renderArranger() {
   }));
 
   // Bar numbers, every few bars as the zoom allows, with the time each starts.
-  const every = [1, 2, 4, 8, 16, 32, 64].find((count) => count * zoom >= 44) || 64;
+  const every = [1, 2, 4, 8, 16, 32, 64, 128].find((count) => count * zoom >= 44) || 128;
   const marks = [];
-  for (let bar = 0; bar <= bars + 8; bar += 1) {
+  const shown = Math.floor((width - LANE_START - 1) / zoom);
+  for (let bar = 0; bar <= shown; bar += 1) {
     if (bar % every && zoom < 10) continue;
     const mark = document.createElement("span");
     mark.className = bar % every ? "tick" : "tick major";

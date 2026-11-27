@@ -246,7 +246,7 @@ header.bar { gap: 6px 10px; }
 .zoom button { min-width: 34px; }
 .arranger-scroll { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .arranger { position: relative; height: 104px; min-width: 100%; }
-.ruler { position: absolute; inset: 0 0 auto 0; height: 34px; border-bottom: 1px solid var(--line); }
+.ruler { position: absolute; inset: 0 0 auto 0; height: 34px; overflow: hidden; border-bottom: 1px solid var(--line); }
 .ruler .tick { position: absolute; top: 24px; bottom: 0; width: 1px; background: var(--line); }
 .ruler .tick.major { top: 0; background: var(--faint); }
 .ruler .tick b { position: absolute; top: 1px; left: 4px; color: var(--text); font-size: 11px; font-weight: 600; white-space: nowrap; }
